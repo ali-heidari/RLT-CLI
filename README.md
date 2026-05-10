@@ -28,7 +28,7 @@ cargo run -- train --dataset ./data/train --epochs 20 --batch-size 64 --learning
 ```
 
 ```bash
-cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/model.onnx --format onnx
+cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/model.json --format json
 ```
 
 ## Project Structure
@@ -36,7 +36,12 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
 - `Cargo.toml` — Rust package manifest
 - `src/main.rs` — CLI entry point and command definitions
 - `copilot-instructions.md` — agent usage instructions and standards reference
+- `docs/` — human-readable project documentation
 - `LICENSE` — project license
+
+## Documentation
+
+This repository includes a `docs/` folder containing Markdown documentation for users and maintainers.
 
 ## Standards
 

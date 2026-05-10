@@ -36,5 +36,10 @@ This repository provides a Rust CLI for Aixker-RLT model training and export ope
   - `docs-conventions.md`
   - `repository-conventions.md`
 
+## Documentation requirements
+- This project uses the `ai-agent-standards` docs convention.
+- A `docs/` folder is required at the repository root.
+- `docs/index.md` must exist and list links to other Markdown files in `docs/`.
+
 ## Sync note
 If the user requests `sync instructions`, refresh this file to remain aligned with the canonical `ai-agent-standards/instructions.md` guidance.
