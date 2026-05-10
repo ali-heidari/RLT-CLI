@@ -1,21 +1,40 @@
 # AION-RLT CLI Agent Instructions
 
-Base standard: `instructions.md` from the `ai-agent-standards` repository is the canonical source for AI agent guidance.
+This file is derived from `ai-agent-standards/instructions.md` and adapts the canonical guidance for this repository.
 
-## Project purpose
-This repository hosts a lightweight Rust CLI for Aixker-RLT model training and export workflows. Key files are:
-- `Cargo.toml` — Rust package manifest and dependency declarations
-- `src/main.rs` — CLI entry point and command handling
-- `README.md` — project overview and usage notes
-- `LICENSE` — license terms
+## Purpose
+This repository provides a Rust CLI for Aixker-RLT model training and export operations.
 
-## Core rule
-Do not invent build, packaging, or CI steps unless explicit manifest/build files exist in this repo. Use only actual project files such as `Cargo.toml`, Rust sources, and existing documentation as the implementation basis.
+## Big picture
+- `RLT-CLI` is a consumer project built around the AIXKER-RLT framework.
+- The canonical AI agent behavior is defined in `ai-agent-standards/instructions.md`.
+- Local agents should treat this file as the project-specific wrapper for those standard instructions.
+
+## Project-specific conventions
+- Key files:
+  - `Cargo.toml` — Rust package manifest and dependency declarations.
+  - `src/main.rs` — CLI entrypoint and command definitions.
+  - `README.md` — project overview, build instructions, and usage examples.
+  - `LICENSE` — license terms.
+- Do not invent build, packaging, or CI steps unless explicit manifest/build files exist in this repo.
+- Prefer small, runnable examples and use exact file paths in code snippets.
 
 ## How to use these standards
-Option 1: Copy the standard files into the project root and keep this file aligned with `ai-agent-standards/instructions.md`.
+- Option A: Copy `instructions.md` and other standard convention files into the project root.
+- Option B: Reference `ai-agent-standards` as a submodule or external template and document any local overrides here.
 
-Option 2: Reference `ai-agent-standards` as an external repository or git submodule/template, and document local overrides here.
+## Agent behavior rules
+- Do not invent project-specific build or CI steps unless you find explicit files such as `Cargo.toml`, `Makefile`, or `.github/workflows` in the repo.
+- When the project rules are unclear, ask a clarifying question instead of guessing.
+- Inspect these files first when making changes:
+  - `README.md`
+  - `instructions.md`
+  - `assistant-conventions.md`
+  - `code-conventions.md`
+  - `cicd-conventions.md`
+  - `commit-conventions.md`
+  - `docs-conventions.md`
+  - `repository-conventions.md`
 
-For the shared canonical file, see:
-- `https://github.com/ali-heidari/ai-agent-standards/blob/develop/instructions.md`
+## Sync note
+If the user requests `sync instructions`, refresh this file to remain aligned with the canonical `ai-agent-standards/instructions.md` guidance.
