@@ -1,4 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use std::fs;
+use std::sync::Arc;
+use tokio;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "AIXKER-RLT CLI for training and exporting reinforcement learning models.", long_about = None)]
@@ -49,15 +52,15 @@ struct TrainArgs {
 #[derive(clap::Args, Debug)]
 struct ExportArgs {
     /// Path to the trained model checkpoint
-    #[arg(long, value_name = "PATH", default_value = "./checkpoints/latest.pt")]
+    #[arg(long, value_name = "PATH", default_value = "./checkpoints/latest.json")]
     checkpoint: String,
 
     /// Output path for the exported model
-    #[arg(long, value_name = "PATH", default_value = "./exported/model.onnx")]
+    #[arg(long, value_name = "PATH", default_value = "./exported/model.json")]
     output: String,
 
     /// Export format for the model
-    #[arg(long, value_enum, default_value_t = ExportFormat::Onnx)]
+    #[arg(long, value_enum, default_value_t = ExportFormat::Json)]
     format: ExportFormat,
 }
 
@@ -72,17 +75,17 @@ enum LogLevel {
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 enum ExportFormat {
-    Onnx,
-    Tflite,
-    Torchscript,
+    Json,
+    // Add other formats as needed
 }
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     println!("AIXKER-RLT CLI invoked with log level: {:?}", cli.log_level);
-    if let Some(config) = &cli.config {
-        println!("Using config file: {}", config);
+    if let Some(config_path) = &cli.config {
+        println!("Using config file: {}", config_path);
     }
 
     match cli.command {
@@ -97,7 +100,40 @@ fn main() {
             if args.dry_run {
                 println!("Dry run enabled. No training will be performed.");
             } else {
-                println!("Training execution placeholder. Implement training loop here.");
+                // Load config or use defaults
+                let config = if let Some(path) = &cli.config {
+                    let config_str = fs::read_to_string(path)?;
+                    let config: aion_rlt::configurations::Configurations = serde_json::from_str(&config_str)?;
+                    Arc::new(config)
+                } else {
+                    // Default config
+                    Arc::new(aion_rlt::configurations::Configurations {
+                        interval_secs: 10, // u64
+                        batch_size: args.batch_size as u32,
+                        total_batches: args.epochs as usize * 100, // Approximate
+                        input_number: 8,
+                        output_number: 3,
+                        hidden_layers: 16,
+                        reply_capacity: 4096,
+                        model_name: "model.json".to_string(),
+                        log_interval: 64,
+                        mode: aion_rlt::RunningMode::Training,
+                    })
+                };
+
+                aion_rlt::initialize(config.clone());
+
+                // Start training node with dummy closures
+                aion_rlt::node::Node::start(
+                    |lowest_state| vec![0.0; 8], // dummy input
+                    |features, action, reward| (0.0, true), // dummy reward
+                    aion_rlt::RunningMode::Training,
+                    &config.model_name,
+                ).await;
+
+                // In a real implementation, you'd run the training loop here
+                // For now, just indicate training started
+                println!("Training node started. Training logic would run here.");
             }
         }
         Commands::Export(args) => {
@@ -105,7 +141,13 @@ fn main() {
             println!("  checkpoint: {}", args.checkpoint);
             println!("  output: {}", args.output);
             println!("  format: {:?}", args.format);
-            println!("Export execution placeholder. Implement export logic here.");
+
+            // Note: Model export not implemented in public API yet
+            // For now, just copy the checkpoint file
+            fs::copy(&args.checkpoint, &args.output)?;
+            println!("Model exported to {}", args.output);
         }
     }
+
+    Ok(())
 }
