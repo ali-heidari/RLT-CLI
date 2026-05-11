@@ -24,7 +24,7 @@ cargo build --release
 ### Run
 
 ```bash
-cargo run -- train --dataset ./data/train --epochs 20 --batch-size 64 --learning-rate 0.001
+cargo run -- train --dataset ./data/train --epochs 20 --batch-size 64 --learning-rate 0.001 --model-name my-model.json
 ```
 
 ```bash
