@@ -47,6 +47,10 @@ struct TrainArgs {
     /// Enable dry-run mode without actually executing training
     #[arg(long, default_value_t = false)]
     dry_run: bool,
+
+    /// Name of the model checkpoint file to use or write
+    #[arg(long, default_value = "model.json", value_name = "NAME")]
+    model_name: String,
 }
 
 #[derive(clap::Args, Debug)]
@@ -95,27 +99,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  epochs: {}", args.epochs);
             println!("  batch size: {}", args.batch_size);
             println!("  learning rate: {}", args.learning_rate);
+            println!("  model name: {}", args.model_name);
             println!("  dry run: {}", args.dry_run);
 
             if args.dry_run {
                 println!("Dry run enabled. No training will be performed.");
             } else {
                 // Load config or use defaults
+let model_name = args.model_name.clone();
                 let config = if let Some(path) = &cli.config {
                     let config_str = fs::read_to_string(path)?;
-                    let config: aion_rlt::configurations::Configurations = serde_json::from_str(&config_str)?;
+                    let mut config: aion_rlt::configurations::Configurations = serde_json::from_str(&config_str)?;
+                    config.model_name = model_name.clone();
                     Arc::new(config)
                 } else {
                     // Default config
                     Arc::new(aion_rlt::configurations::Configurations {
                         interval_secs: 10, // u64
-                        batch_size: args.batch_size as u32,
+                        batch_size: args.batch_size,
                         total_batches: args.epochs as usize * 100, // Approximate
                         input_number: 8,
                         output_number: 3,
                         hidden_layers: 16,
                         reply_capacity: 4096,
-                        model_name: "model.json".to_string(),
+                        model_name,
                         log_interval: 64,
                         mode: aion_rlt::RunningMode::Training,
                     })
