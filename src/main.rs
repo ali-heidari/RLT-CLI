@@ -8,10 +8,6 @@ use std::sync::Arc;
 use tokio;
 use toml;
 
-fn cli_option_present(name: &str) -> bool {
-    std::env::args().any(|arg| arg == name || arg.starts_with(&format!("{}=", name)))
-}
-
 fn load_config(
     config_path: Option<&String>,
     default_mode: aixker_rlt::RunningMode,
@@ -30,7 +26,7 @@ fn load_config(
             output_number: 3,
             hidden_layers: 16,
             reply_capacity: 4096,
-            model_name: "model.json".to_string(),
+            model_name: String::new(),
             log_interval: 64,
             mode: default_mode,
         })
@@ -47,8 +43,8 @@ fn override_train_config(
     if args.epochs != 0 {
         config.total_batches = args.epochs as usize * 100;
     }
-    if !args.model_name.is_empty() {
-        config.model_name = args.model_name.clone();
+    if let Some(model_name) = &args.model_name {
+        config.model_name = model_name.clone();
     }
 }
 
@@ -56,8 +52,8 @@ fn override_infer_config(
     config: &mut aixker_rlt::configurations::Configurations,
     args: &InferArgs,
 ) {
-    if cli_option_present("--model-name") {
-        config.model_name = args.model_name.clone();
+    if let Some(model_name) = &args.model_name {
+        config.model_name = model_name.clone();
     }
 }
 
@@ -70,7 +66,10 @@ async fn run_train(
     println!("  epochs: {}", args.epochs);
     println!("  batch size: {}", args.batch_size);
     println!("  learning rate: {}", args.learning_rate);
-    println!("  model name: {}", args.model_name);
+    println!(
+        "  model name: {}",
+        args.model_name.as_deref().unwrap_or("<from config>")
+    );
     println!("  dry run: {}", args.dry_run);
 
     if args.dry_run {
@@ -80,6 +79,9 @@ async fn run_train(
 
     let mut config = load_config(config_path, aixker_rlt::RunningMode::Training)?;
     override_train_config(&mut config, &args);
+    if config.model_name.is_empty() {
+        return Err("model_name must be set in config.toml or via --model-name".into());
+    }
     let config = Arc::new(config);
 
     aixker_rlt::initialize(config.clone());
@@ -111,7 +113,10 @@ async fn run_infer(
     args: InferArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Performing inference with the following settings:");
-    println!("  model name: {}", args.model_name);
+    println!(
+        "  model name: {}",
+        args.model_name.as_deref().unwrap_or("<from config>")
+    );
     if let Some(features) = &args.features {
         println!("  features: {}", features);
     } else {
@@ -120,6 +125,9 @@ async fn run_infer(
 
     let mut config = load_config(config_path, aixker_rlt::RunningMode::Infer)?;
     override_infer_config(&mut config, &args);
+    if config.model_name.is_empty() {
+        return Err("model_name must be set in config.toml or via --model-name".into());
+    }
     let config = Arc::new(config);
 
     aixker_rlt::initialize(config.clone());
@@ -138,7 +146,7 @@ async fn run_infer(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let config_path = cli.config.clone();
+    let config_path = cli.config.clone().or_else(|| Some("Config.toml".to_string()));
 
     println!("AIXKER-RLT CLI invoked with log level: {:?}", cli.log_level);
     if let Some(config_path) = &config_path {

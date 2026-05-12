@@ -33,15 +33,15 @@ pub struct TrainArgs {
     pub dry_run: bool,
 
     /// Name of the model checkpoint file to use or write
-    #[arg(long, default_value = "model.json", value_name = "NAME")]
-    pub model_name: String,
+    #[arg(long, value_name = "NAME")]
+    pub model_name: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct InferArgs {
     /// Name of the model checkpoint file to load for inference
-    #[arg(long, default_value = "model.json", value_name = "NAME")]
-    pub model_name: String,
+    #[arg(long, value_name = "NAME")]
+    pub model_name: Option<String>,
 
     /// Input features as comma-separated floats (e.g., "1.0,2.0,3.0")
     #[arg(long, value_name = "FEATURES")]
