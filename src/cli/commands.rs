@@ -4,6 +4,8 @@ use clap::{Subcommand, ValueEnum};
 pub enum Commands {
     /// Start training a model with customizable hyperparameters
     Train(TrainArgs),
+    /// Perform inference to get actions from a trained model
+    Infer(InferArgs),
     /// Export a trained model to a supported format
     Export(ExportArgs),
 }
@@ -33,6 +35,17 @@ pub struct TrainArgs {
     /// Name of the model checkpoint file to use or write
     #[arg(long, default_value = "model.json", value_name = "NAME")]
     pub model_name: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct InferArgs {
+    /// Name of the model checkpoint file to load for inference
+    #[arg(long, default_value = "model.json", value_name = "NAME")]
+    pub model_name: String,
+
+    /// Input features as comma-separated floats (e.g., "1.0,2.0,3.0")
+    #[arg(long, value_name = "FEATURES")]
+    pub features: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]

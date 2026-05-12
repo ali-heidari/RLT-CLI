@@ -23,6 +23,10 @@ cargo run -- train --dataset ./data/train --epochs 20 --batch-size 64 --learning
 ```
 
 ```bash
+cargo run -- infer --model-name my-model.json --features "1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0"
+```
+
+```bash
 cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/model.json --format json
 ```
 
@@ -32,7 +36,7 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
 - `--log-level [error|warn|info|debug|trace]`
   - Sets the CLI logging verbosity.
 - `--config FILE`
-  - Path to a JSON configuration file to override default settings.
+  - Path to a TOML configuration file to override default settings. Command-line flags take precedence over config file values. See `Config.toml` for a sample configuration.
 
 ### Train Subcommand
 - `--dataset PATH`
@@ -47,6 +51,12 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
   - Validate and print the resolved training settings without actually running model training.
 - `--model-name NAME`
   - Checkpoint file name for the trained model. Default: `model.json`.
+
+### Infer Subcommand
+- `--model-name NAME`
+  - Checkpoint file name for the trained model to load. Default: `model.json`.
+- `--features FEATURES`
+  - Comma-separated list of input features as floats (e.g., "1.0,2.0,3.0"). If not provided, uses dummy values.
 
 ### Export Subcommand
 - `--checkpoint PATH`

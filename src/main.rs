@@ -5,6 +5,7 @@ use cli::{Cli, Commands};
 use std::fs;
 use std::sync::Arc;
 use tokio;
+use toml;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,37 +30,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Dry run enabled. No training will be performed.");
             } else {
                 // Load config or use defaults
-let model_name = args.model_name.clone();
-                let config = if let Some(path) = &cli.config {
+                let mut config = if let Some(path) = &cli.config {
                     let config_str = fs::read_to_string(path)?;
-                    let mut config: aion_rlt::configurations::Configurations = serde_json::from_str(&config_str)?;
-                    config.model_name = model_name.clone();
-                    Arc::new(config)
+                    toml::from_str(&config_str)?
                 } else {
                     // Default config
-                    Arc::new(aion_rlt::configurations::Configurations {
+                    aion_rlt::configurations::Configurations {
                         interval_secs: 10, // u64
-                        batch_size: args.batch_size,
-                        total_batches: args.epochs as usize * 100, // Approximate
+                        batch_size: 32,
+                        total_batches: 1000,
                         input_number: 8,
                         output_number: 3,
                         hidden_layers: 16,
                         reply_capacity: 4096,
-                        model_name,
+                        model_name: "model.json".to_string(),
                         log_interval: 64,
                         mode: aion_rlt::RunningMode::Training,
-                    })
+                    }
                 };
+
+                // Override with CLI args
+                config.batch_size = args.batch_size;
+                config.total_batches = args.epochs as usize * 100;
+                config.model_name = args.model_name.clone();
+
+                let config = Arc::new(config);
 
                 aion_rlt::initialize(config.clone());
 
                 // Start training node with dummy closures
                 aion_rlt::node::Node::start(
-                    |_lowest_state| vec![0.0; 8], // dummy input
+                    |_lowest_state| vec![0.0; 8],              // dummy input
                     |_features, _action, _reward| (0.0, true), // dummy reward
                     aion_rlt::RunningMode::Training,
                     &config.model_name,
-                ).await;
+                )
+                .await;
 
                 // In a real implementation, you'd run the training loop here
                 // For now, just indicate training started
@@ -76,6 +82,58 @@ let model_name = args.model_name.clone();
             // For now, just copy the checkpoint file
             fs::copy(&args.checkpoint, &args.output)?;
             println!("Model exported to {}", args.output);
+        }
+        Commands::Infer(args) => {
+            println!("Performing inference with the following settings:");
+            println!("  model name: {}", args.model_name);
+            if let Some(features) = &args.features {
+                println!("  features: {}", features);
+            } else {
+                println!("  features: using dummy values");
+            }
+
+            // Load config or use defaults
+            let mut config = if let Some(path) = &cli.config {
+                let config_str = fs::read_to_string(path)?;
+                toml::from_str(&config_str)?
+            } else {
+                // Default config
+                aion_rlt::configurations::Configurations {
+                    interval_secs: 10,
+                    batch_size: 32,
+                    total_batches: 1000,
+                    input_number: 8,
+                    output_number: 3,
+                    hidden_layers: 16,
+                    reply_capacity: 4096,
+                    model_name: "model.json".to_string(),
+                    log_interval: 64,
+                    mode: aion_rlt::RunningMode::Infer,
+                }
+            };
+
+            // Override with CLI args
+            config.model_name = args.model_name.clone();
+
+            let config = Arc::new(config);
+            aion_rlt::initialize(config.clone());
+
+            // Start inference node
+            aion_rlt::node::Node::start(
+                |_lowest_state| {
+                    if let Some(features_str) = &args.features {
+                        features_str.split(',').map(|s| s.trim().parse().unwrap_or(0.0)).collect()
+                    } else {
+                        vec![0.0; 8] // dummy
+                    }
+                },
+                |_features, _action, _reward| (0.0, true), // dummy reward
+                aion_rlt::RunningMode::Infer,
+                &config.model_name,
+            )
+            .await;
+
+            println!("Inference completed.");
         }
     }
 

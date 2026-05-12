@@ -28,12 +28,20 @@ cargo run -- train --dataset ./data/train --epochs 20 --batch-size 64 --learning
 ```
 
 ```bash
+cargo run -- infer --model-name my-model.json --features "1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0"
+```
+
+```bash
 cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/model.json --format json
 ```
 
 ### Dry Run
 
 Use `--dry-run` with `train` to validate CLI arguments and show the configured settings without actually starting training. This is useful for confirming your dataset path, hyperparameters, and model name before running a long job.
+
+### Configuration
+
+You can provide a TOML configuration file using `--config Config.toml` to set default values. Command-line flags will override the config file settings. See `Config.toml` for a sample configuration.
 
 ## Project Structure
 
