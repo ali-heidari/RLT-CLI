@@ -7,6 +7,10 @@ use std::sync::Arc;
 use tokio;
 use toml;
 
+fn cli_option_present(name: &str) -> bool {
+    std::env::args().any(|arg| arg == name || arg.starts_with(&format!("{}=", name)))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -49,10 +53,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 };
 
-                // Override with CLI args
-                config.batch_size = args.batch_size;
-                config.total_batches = args.epochs as usize * 100;
-                config.model_name = args.model_name.clone();
+                // Override with CLI args when present
+                if args.batch_size != 0 {
+                    config.batch_size = args.batch_size;
+                }
+                if args.epochs != 0 {
+                    config.total_batches = args.epochs as usize * 100;
+                }
+                if !args.model_name.is_empty() {
+                    config.model_name = args.model_name.clone();
+                }
 
                 let config = Arc::new(config);
 
@@ -112,8 +122,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            // Override with CLI args
-            config.model_name = args.model_name.clone();
+            // Override with CLI args when the user actually passed them
+            if cli_option_present("--model-name") {
+                config.model_name = args.model_name.clone();
+            }
+
+            if cli_option_present("--model-name") {
+                config.model_name = args.model_name.clone();
+            }
 
             let config = Arc::new(config);
             aion_rlt::initialize(config.clone());
