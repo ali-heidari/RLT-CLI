@@ -24,4 +24,4 @@ Cargo.lock
 
 models/*
 sample-data
-Config-sample.toml
+Config.toml

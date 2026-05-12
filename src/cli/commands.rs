@@ -12,9 +12,9 @@ pub enum Commands {
 
 #[derive(clap::Args, Debug)]
 pub struct TrainArgs {
-    /// Path to the training dataset or environment configuration
-    #[arg(long, value_name = "PATH", default_value = "./data/train")]
-    pub dataset: String,
+    /// Path to the training CSV dataset
+    #[arg(long, value_name = "PATH")]
+    pub dataset: Option<String>,
 
     /// Number of training epochs
     #[arg(long, default_value_t = 10)]

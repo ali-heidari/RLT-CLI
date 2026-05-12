@@ -1,12 +1,12 @@
 mod cli;
+mod providers;
 
 use clap::Parser;
 use cli::commands::{InferArgs, TrainArgs};
 use cli::{Cli, Commands};
+use providers::csv_dataset::open_csv_dataset;
 use std::fs;
 use std::sync::Arc;
-use tokio;
-use toml;
 
 fn load_config(
     config_path: Option<&String>,
@@ -30,6 +30,21 @@ fn load_config(
             log_interval: 64,
             mode: default_mode,
         })
+    }
+}
+
+fn load_dataset_path(
+    config_path: Option<&String>,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    if let Some(path) = config_path {
+        let config_str = fs::read_to_string(path)?;
+        let value: toml::Value = toml::from_str(&config_str)?;
+        Ok(value
+            .get("dataset")
+            .and_then(|v| v.as_str())
+            .map(String::from))
+    } else {
+        Ok(None)
     }
 }
 
@@ -62,7 +77,12 @@ async fn run_train(
     args: TrainArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting training with the following settings:");
-    println!("  dataset: {}", args.dataset);
+    println!(
+        "  dataset: {}",
+        args.dataset
+            .as_deref()
+            .unwrap_or("<from config or required>")
+    );
     println!("  epochs: {}", args.epochs);
     println!("  batch size: {}", args.batch_size);
     println!("  learning rate: {}", args.learning_rate);
@@ -82,6 +102,22 @@ async fn run_train(
     if config.model_name.is_empty() {
         return Err("model_name must be set in config.toml or via --model-name".into());
     }
+
+    let config_dataset = load_dataset_path(config_path)?;
+    let dataset_path = args
+        .dataset
+        .clone()
+        .or(config_dataset)
+        .ok_or("dataset must be set in config.toml or via --dataset")?;
+
+    let mut dataset = open_csv_dataset(&dataset_path)?;
+    println!("Opened CSV dataset stream from {}", dataset_path);
+
+    if let Some(first_row) = dataset.next() {
+        let row = first_row?;
+        println!("First CSV row loaded with {} fields", row.len());
+    }
+
     let config = Arc::new(config);
 
     aixker_rlt::initialize(config.clone());
