@@ -31,6 +31,10 @@ cargo run -- train --dataset ./data/train --epochs 20 --batch-size 64 --learning
 cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/model.json --format json
 ```
 
+### Dry Run
+
+Use `--dry-run` with `train` to validate CLI arguments and show the configured settings without actually starting training. This is useful for confirming your dataset path, hyperparameters, and model name before running a long job.
+
 ## Project Structure
 
 - `Cargo.toml` — Rust package manifest
@@ -54,6 +58,9 @@ This repository follows the `ai-agent-standards` conventions. The AI agent guida
 Apache-2.0
 
 This repository follows the `ai-agent-standards` instruction conventions. The main AI agent guidance is documented in `copilot-instructions.md`, and the shared standard files are available from the `ai-agent-standards` repository.
+
+For more usage information, see the docs index:
+- `docs/index.md`
 
 See also:
 - `copilot-instructions.md`
