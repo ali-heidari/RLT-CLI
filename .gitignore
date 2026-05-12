@@ -21,3 +21,6 @@ target
 #.idea/
 
 Cargo.lock
+
+models/*
+sample-data
