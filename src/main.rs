@@ -14,15 +14,15 @@ fn cli_option_present(name: &str) -> bool {
 
 fn load_config(
     config_path: Option<&String>,
-    default_mode: aion_rlt::RunningMode,
-) -> Result<aion_rlt::configurations::Configurations, Box<dyn std::error::Error>> {
+    default_mode: aixker_rlt::RunningMode,
+) -> Result<aixker_rlt::configurations::Configurations, Box<dyn std::error::Error>> {
     if let Some(path) = config_path {
         let config_str = fs::read_to_string(path)?;
-        let mut config: aion_rlt::configurations::Configurations = toml::from_str(&config_str)?;
+        let mut config: aixker_rlt::configurations::Configurations = toml::from_str(&config_str)?;
         config.mode = default_mode;
         Ok(config)
     } else {
-        Ok(aion_rlt::configurations::Configurations {
+        Ok(aixker_rlt::configurations::Configurations {
             interval_secs: 10,
             batch_size: 32,
             total_batches: 1000,
@@ -38,7 +38,7 @@ fn load_config(
 }
 
 fn override_train_config(
-    config: &mut aion_rlt::configurations::Configurations,
+    config: &mut aixker_rlt::configurations::Configurations,
     args: &TrainArgs,
 ) {
     if args.batch_size != 0 {
@@ -53,7 +53,7 @@ fn override_train_config(
 }
 
 fn override_infer_config(
-    config: &mut aion_rlt::configurations::Configurations,
+    config: &mut aixker_rlt::configurations::Configurations,
     args: &InferArgs,
 ) {
     if cli_option_present("--model-name") {
@@ -78,15 +78,15 @@ async fn run_train(
         return Ok(());
     }
 
-    let mut config = load_config(config_path, aion_rlt::RunningMode::Training)?;
+    let mut config = load_config(config_path, aixker_rlt::RunningMode::Training)?;
     override_train_config(&mut config, &args);
     let config = Arc::new(config);
 
-    aion_rlt::initialize(config.clone());
-    aion_rlt::node::Node::start(
+    aixker_rlt::initialize(config.clone());
+    aixker_rlt::node::Node::start(
         |_lowest_state| vec![0.0; 8],              // dummy input
         |_features, _action, _reward| (0.0, true), // dummy reward
-        aion_rlt::RunningMode::Training,
+        aixker_rlt::RunningMode::Training,
         &config.model_name,
     )
     .await;
@@ -118,15 +118,15 @@ async fn run_infer(
         println!("  features: using dummy values");
     }
 
-    let mut config = load_config(config_path, aion_rlt::RunningMode::Infer)?;
+    let mut config = load_config(config_path, aixker_rlt::RunningMode::Infer)?;
     override_infer_config(&mut config, &args);
     let config = Arc::new(config);
 
-    aion_rlt::initialize(config.clone());
-    aion_rlt::node::Node::start(
+    aixker_rlt::initialize(config.clone());
+    aixker_rlt::node::Node::start(
         |_lowest_state| parse_features(&args.features),
         |_features, _action, _reward| (0.0, true),
-        aion_rlt::RunningMode::Infer,
+        aixker_rlt::RunningMode::Infer,
         &config.model_name,
     )
     .await;

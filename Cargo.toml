@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-aion-rlt = { git = "https://github.com/ali-heidari/Aixker-RLT" }
+aixker-rlt = { git = "https://github.com/ali-heidari/Aixker-RLT" }
 tokio = { version = "1", features = ["full"] }
 toml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
