@@ -43,6 +43,10 @@ Use `--dry-run` with `train` to validate CLI arguments and show the configured s
 
 You can provide a TOML configuration file using `--config Config.toml` to set default values. Command-line flags will override the config file settings. See `Config.toml` for a sample configuration.
 
+## Documentation
+
+For detailed usage instructions, troubleshooting common errors, and more information, see the [documentation](docs/index.md).
+
 ## Project Structure
 
 - `Cargo.toml` — Rust package manifest
