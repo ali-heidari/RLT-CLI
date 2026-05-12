@@ -110,19 +110,33 @@ async fn run_train(
         .or(config_dataset)
         .ok_or("dataset must be set in config.toml or via --dataset")?;
 
-    let mut dataset = open_csv_dataset(&dataset_path)?;
+    let dataset = open_csv_dataset(&dataset_path)?;
+    let cloned_dataset= Arc::new(std::sync::Mutex::new(dataset));
     println!("Opened CSV dataset stream from {}", dataset_path);
 
-    if let Some(first_row) = dataset.next() {
+    if let Some(first_row) = cloned_dataset.lock().unwrap().next() {
         let row = first_row?;
         println!("First CSV row loaded with {} fields", row.len());
     }
 
     let config = Arc::new(config);
+    let input_number = config.input_number as usize;
 
     aixker_rlt::initialize(config.clone());
     aixker_rlt::node::Node::start(
-        |_lowest_state| vec![0.0; 8],              // dummy input
+        move |_lowest_state| {
+            let a= if let Some(row_result) = cloned_dataset.lock().unwrap().next() {
+                match row_result {
+                    Ok(row) => row.into_iter().map(|x| x as f32).collect(),
+                    Err(_) => vec![0.0; input_number],
+                }
+            } else {
+                vec![0.0; input_number]
+            };
+
+            print!("Features for training: {:?}", a);
+            a
+        },
         |_features, _action, _reward| (0.0, true), // dummy reward
         aixker_rlt::RunningMode::Training,
         &config.model_name,
