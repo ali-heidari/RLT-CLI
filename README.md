@@ -62,7 +62,7 @@ cargo run -- train --dataset ./system_metrics.py --epochs 20 --batch-size 64 --m
 ```
 
 ```bash
-cargo run -- infer --model-name my-model.json --features "1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0"
+cargo run -- infer --dataset ./data/train.csv --model-name my-model.json
 ```
 
 ```bash

@@ -43,13 +43,13 @@ pub struct TrainArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct InferArgs {
+    /// Path to the data source for inference
+    #[arg(long, value_name = "PATH")]
+    pub dataset: Option<String>,
+
     /// Name of the model checkpoint file to load for inference
     #[arg(long, value_name = "NAME")]
     pub model_name: Option<String>,
-
-    /// Input features as comma-separated floats (e.g., "1.0,2.0,3.0")
-    #[arg(long, value_name = "FEATURES")]
-    pub features: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]

@@ -230,31 +230,24 @@ async fn run_train(
     Ok(())
 }
 
-fn parse_features(features: &Option<String>) -> Vec<f32> {
-    if let Some(features_str) = features {
-        features_str
-            .split(',')
-            .map(|s| s.trim().parse().unwrap_or(0.0))
-            .collect()
-    } else {
-        vec![0.0; 8]
-    }
-}
-
 async fn run_infer(
     config_path: Option<&String>,
     args: InferArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Performing inference with the following settings:");
+    
+    let config_dataset = load_dataset_path(config_path)?;
+    let dataset_path = args
+        .dataset
+        .clone()
+        .or(config_dataset)
+        .ok_or("dataset must be set in config.toml or via --dataset")?;
+    
+    println!("  dataset: {}", dataset_path);
     println!(
         "  model name: {}",
         args.model_name.as_deref().unwrap_or("<from config>")
     );
-    if let Some(features) = &args.features {
-        println!("  features: {}", features);
-    } else {
-        println!("  features: using dummy values");
-    }
 
     let mut config = load_config(config_path, aixker_rlt::RunningMode::Infer)?;
     override_infer_config(&mut config, &args);
@@ -265,7 +258,7 @@ async fn run_infer(
 
     aixker_rlt::initialize(config.clone());
     aixker_rlt::node::Node::start(
-        |_lowest_state| parse_features(&args.features),
+        |_lowest_state| vec![0.0; 8],
         |_features, _action, _reward| (0.0, true),
         aixker_rlt::RunningMode::Infer,
         &config.model_name,

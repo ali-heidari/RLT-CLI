@@ -23,7 +23,11 @@ cargo run -- train --dataset ./data/train --epochs 20 --batch-size 64 --learning
 ```
 
 ```bash
-cargo run -- infer --model-name my-model.json --features "1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0"
+cargo run -- infer --dataset ./data/train.csv --model-name my-model.json
+```
+
+```bash
+cargo run -- infer --dataset ./system_metrics.py --model-name my-model.json
 ```
 
 ```bash
@@ -59,10 +63,13 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
     The script receives a JSON request on stdin and returns a JSON response on stdout.
 
 ### Infer Subcommand
+- `--dataset PATH`
+  - **Required**. Path to the data source (CSV file or Python script) to specify which data context the inference is for.
+    - Can be a CSV file (`*.csv`) or Python script (`*.py`).
+    - Used for logging and validation; inference operates on the model's learned behavior.
+  - Must be set in `Config.toml` or via `--dataset`.
 - `--model-name NAME`
   - Checkpoint file name for the trained model to load. Default: `model.json`.
-- `--features FEATURES`
-  - Comma-separated list of input features as floats (e.g., "1.0,2.0,3.0"). If not provided, uses dummy values.
 
 ### Export Subcommand
 - `--checkpoint PATH`
