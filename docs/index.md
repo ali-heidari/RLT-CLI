@@ -5,6 +5,7 @@ This folder contains human-readable documentation for the RLT-CLI project.
 ## Docs
 
 - [Usage](usage.md)
+- [Data providers](data_providers.md)
 - [CLI workflow](cli_workflow.md)
 - [Reward factory](reward_factory.md)
 - [Troubleshooting](troubleshooting.md)

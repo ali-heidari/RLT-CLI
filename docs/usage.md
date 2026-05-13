@@ -40,7 +40,10 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
 
 ### Train Subcommand
 - `--dataset PATH`
-  - Path to the training dataset or environment configuration. Default: `./data/train`.
+  - Path to the training dataset file. Can be either a CSV file (`*.csv`) or a Python script (`*.py`).
+    - **CSV**: Each line is parsed as comma-separated floats representing feature vectors.
+    - **Python**: The script is called repeatedly, and its output is parsed as JSON array or comma-separated floats.
+  - Default: `./data/train`.
 - `--epochs N`
   - Number of training epochs. Default: `10`.
 - `--batch-size N`
