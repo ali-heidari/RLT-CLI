@@ -6,6 +6,7 @@ use clap::Parser;
 use cli::commands::{InferArgs, TrainArgs};
 use cli::{Cli, Commands};
 use providers::csv_dataset::open_csv_dataset;
+use providers::python_script::open_python_script;
 use reward_factory::RewardFactory;
 use std::fs;
 use std::path::PathBuf;
@@ -159,35 +160,71 @@ async fn run_train(
         RewardFactory::new(None)
     };
 
-    let dataset = open_csv_dataset(&dataset_path)?;
-    let cloned_dataset = Arc::new(std::sync::Mutex::new(dataset));
-    println!("Opened CSV dataset stream from {}", dataset_path);
+    // Determine which data provider to use based on file extension
+    let is_python_script = dataset_path.ends_with(".py");
+    
+    if is_python_script {
+        println!("Using Python script data provider from {}", dataset_path);
+        let mut provider = open_python_script(&dataset_path)?;
+        
+        // Get first sample to validate
+        if let Some(first_row_result) = provider.next() {
+            let first_row = first_row_result?;
+            println!("First sample loaded with {} features", first_row.len());
+        }
 
-    if let Some(first_row) = cloned_dataset.lock().unwrap().next() {
-        let row = first_row?;
-        println!("First CSV row loaded with {} fields", row.len());
-    }
+        let cloned_provider = Arc::new(std::sync::Mutex::new(provider));
+        let config = Arc::new(config);
+        let input_number = config.input_number as usize;
 
-    let config = Arc::new(config);
-    let input_number = config.input_number as usize;
-
-    aixker_rlt::initialize(config.clone());
-    aixker_rlt::node::Node::start(
-        move |_lowest_state| {
-             if let Some(row_result) = cloned_dataset.lock().unwrap().next() {
-                match row_result {
-                    Ok(row) => row.into_iter().map(|x| x as f32).collect(),
-                    Err(_) => vec![0.0; input_number],
+        aixker_rlt::initialize(config.clone());
+        aixker_rlt::node::Node::start(
+            move |_lowest_state| {
+                if let Some(row_result) = cloned_provider.lock().unwrap().next() {
+                    match row_result {
+                        Ok(row) => row.into_iter().map(|x| x as f32).collect(),
+                        Err(_) => vec![0.0; input_number],
+                    }
+                } else {
+                    vec![0.0; input_number]
                 }
-            } else {
-                vec![0.0; input_number]
-            }
-        },
-        move |features, action, reward| reward_factory.evaluate(features, action, reward),
-        aixker_rlt::RunningMode::Training,
-        &config.model_name,
-    )
-    .await;
+            },
+            move |features, action, reward| reward_factory.evaluate(features, action, reward),
+            aixker_rlt::RunningMode::Training,
+            &config.model_name,
+        )
+        .await;
+    } else {
+        let dataset = open_csv_dataset(&dataset_path)?;
+        let cloned_dataset = Arc::new(std::sync::Mutex::new(dataset));
+        println!("Opened CSV dataset stream from {}", dataset_path);
+
+        if let Some(first_row) = cloned_dataset.lock().unwrap().next() {
+            let row = first_row?;
+            println!("First CSV row loaded with {} fields", row.len());
+        }
+
+        let config = Arc::new(config);
+        let input_number = config.input_number as usize;
+
+        aixker_rlt::initialize(config.clone());
+        aixker_rlt::node::Node::start(
+            move |_lowest_state| {
+                if let Some(row_result) = cloned_dataset.lock().unwrap().next() {
+                    match row_result {
+                        Ok(row) => row.into_iter().map(|x| x as f32).collect(),
+                        Err(_) => vec![0.0; input_number],
+                    }
+                } else {
+                    vec![0.0; input_number]
+                }
+            },
+            move |features, action, reward| reward_factory.evaluate(features, action, reward),
+            aixker_rlt::RunningMode::Training,
+            &config.model_name,
+        )
+        .await;
+    }
 
     println!("Training node started. Training logic would run here.");
     Ok(())
