@@ -79,17 +79,21 @@ def _uptime_days():
 
 def get_system_metrics():
     """
-    Collect system metrics and return as a list of floats.
+    Collect system metrics and return as a list of floats in 0.0-1.0 range.
 
-    Metrics returned (in order):
-    1. CPU usage percentage (0-100)
-    2. Memory usage percentage (0-100)
-    3. Disk usage percentage (0-100)
-    4. Load average (1-minute)
-    5. Load average (5-minute)
-    6. Load average (15-minute)
-    7. Number of processes
-    8. Uptime in days
+    All metrics are normalized to [0.0, 1.0] range:
+    1. CPU usage (0-100% → 0.0-1.0)
+    2. Memory usage (0-100% → 0.0-1.0)
+    3. Network traffic (0-300 → 0.0-1.0)
+    4. Power consumption (0-400 → 0.0-1.0)
+    5. Num executed instructions (0-8000 → 0.0-1.0)
+    6. Execution time (0-80 → 0.0-1.0)
+    7. Energy efficiency (already 0.0-1.0)
+    8. Task type encoded (0-2 → 0.0-1.0)
+    9. Task priority encoded (0-2 → 0.0-1.0)
+    10. Task status encoded (1-2 → 0.0-1.0)
+    11. VM ID hash (already 0.0-1.0)
+    12. Timestamp normalized (already 0.0-1.0)
     """
     cpu_percent = _cpu_percent(interval=0.1)
     memory_percent = _memory_percent()
@@ -98,15 +102,39 @@ def get_system_metrics():
     process_count = _process_count()
     uptime_days = _uptime_days()
 
+    # Normalize features to match training data ranges first, then scale to 0.0-1.0
+    network_traffic = min(300.0, load_avg[0] * 50.0)  # Load * 50, capped at 300
+    power_consumption = min(400.0, cpu_percent * 3.0 + memory_percent * 2.0)  # CPU*3 + Mem*2, capped at 400
+    num_instructions = min(8000.0, process_count * 30.0)  # Process count * 30, capped at 8000
+    execution_time = min(80.0, uptime_days * 10.0)  # Uptime * 10, capped at 80
+    energy_efficiency = max(0.0, min(1.0, (100.0 - cpu_percent - memory_percent) / 100.0))  # Inverse of resource usage
+
+    # Encode categorical features (using simple rules)
+    task_type = 0 if load_avg[0] < 1.0 else (1 if load_avg[0] < 3.0 else 2)  # 0=network, 1=io, 2=compute
+    task_priority = 0 if cpu_percent < 30.0 else (1 if cpu_percent < 70.0 else 2)  # 0=low, 1=medium, 2=high
+    task_status = 1 if cpu_percent < 90.0 else 2  # 1=completed, 2=failed (based on CPU stress)
+
+    # VM ID hash (simple hash of hostname)
+    import hashlib
+    vm_id_hash = int(hashlib.md5(os.uname().nodename.encode()).hexdigest()[:8], 16) / 2**32
+
+    # Timestamp normalized to 0-1 range
+    timestamp_norm = (time.time() % 86400) / 86400.0  # Daily cycle normalized
+
+    # Normalize all values directly to 0.0-1.0 range
     return [
-        cpu_percent,
-        memory_percent,
-        disk_percent,
-        float(load_avg[0]),
-        float(load_avg[1]),
-        float(load_avg[2]),
-        process_count,
-        uptime_days,
+        cpu_percent / 100.0,           # 1. CPU usage % → 0.0-1.0
+        memory_percent / 100.0,        # 2. Memory usage % → 0.0-1.0
+        min(1.0, load_avg[0] / 6.0),   # 3. Network traffic (load avg 0-6 → 0.0-1.0)
+        min(1.0, (cpu_percent * 3.0 + memory_percent * 2.0) / 400.0),  # 4. Power consumption → 0.0-1.0
+        min(1.0, process_count / 8000.0),  # 5. Num executed instructions → 0.0-1.0
+        min(1.0, uptime_days / 80.0),  # 6. Execution time (days) → 0.0-1.0
+        energy_efficiency,              # 7. Energy efficiency (already 0.0-1.0)
+        float(task_type) / 2.0,        # 8. Task type encoded → 0.0-1.0
+        float(task_priority) / 2.0,    # 9. Task priority encoded → 0.0-1.0
+        (float(task_status) - 1.0),    # 10. Task status encoded → 0.0-1.0
+        vm_id_hash,                     # 11. VM ID hash (already 0.0-1.0)
+        timestamp_norm,                 # 12. Timestamp normalized (already 0.0-1.0)
     ]
 
 
@@ -115,7 +143,7 @@ def main():
         metrics = get_system_metrics()
         print(json.dumps(metrics))
     except Exception as e:
-        print(json.dumps([0.0] * 8), file=sys.stderr)
+        print(json.dumps([0.0] * 12), file=sys.stderr)
         sys.exit(1)
 
 

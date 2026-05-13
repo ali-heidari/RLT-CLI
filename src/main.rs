@@ -134,26 +134,16 @@ async fn run_train(
     let reward_script_path = args.reward_script.clone().or(config_reward_script);
     println!(
         "  reward script: {}",
-        reward_script_path
-            .as_deref()
-            .unwrap_or("<disabled>")
+        reward_script_path.as_deref().unwrap_or("<disabled>")
     );
 
     let reward_factory = if let Some(script_path) = reward_script_path {
         let path = PathBuf::from(&script_path);
         if !path.exists() {
-            return Err(format!(
-                "reward script path does not exist: {}",
-                path.display()
-            )
-            .into());
+            return Err(format!("reward script path does not exist: {}", path.display()).into());
         }
         if !path.is_file() {
-            return Err(format!(
-                "reward script path is not a file: {}",
-                path.display()
-            )
-            .into());
+            return Err(format!("reward script path is not a file: {}", path.display()).into());
         }
         RewardFactory::new(Some(path))
     } else {
@@ -162,11 +152,11 @@ async fn run_train(
 
     // Determine which data provider to use based on file extension
     let is_python_script = dataset_path.ends_with(".py");
-    
+
     if is_python_script {
         println!("Using Python script data provider from {}", dataset_path);
         let mut provider = open_python_script(&dataset_path)?;
-        
+
         // Get first sample to validate
         if let Some(first_row_result) = provider.next() {
             let first_row = first_row_result?;
@@ -219,7 +209,11 @@ async fn run_train(
                     vec![0.0; input_number]
                 }
             },
-            move |features, action, reward| reward_factory.evaluate(features, action, reward),
+            move |features, action, reward| {let data=reward_factory.evaluate(features, action, reward);
+            println!("Received features: {:?}, action: {}, reward: {}, returning reward: {}, success: {}",
+                features, action, reward, data.0, data.1);
+                data
+        },
             aixker_rlt::RunningMode::Training,
             &config.model_name,
         )
@@ -235,14 +229,14 @@ async fn run_infer(
     args: InferArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Performing inference with the following settings:");
-    
+
     let config_dataset = load_dataset_path(config_path)?;
     let dataset_path = args
         .dataset
         .clone()
         .or(config_dataset)
         .ok_or("dataset must be set in config.toml or via --dataset")?;
-    
+
     println!("  dataset: {}", dataset_path);
     println!(
         "  model name: {}",
@@ -271,16 +265,23 @@ async fn run_infer(
             move |_lowest_state| {
                 if let Some(row_result) = cloned_provider.lock().unwrap().next() {
                     match row_result {
-                        Ok(row) => row.into_iter().map(|x| x as f32).collect(),
-                        Err(_) => vec![0.0; input_number],
+                        Ok(row) => {
+                            let features: Vec<f32> = row.into_iter().map(|x| x as f32).collect();
+                            features
+                        },
+                        Err(_) => {
+                            vec![0.0; input_number]
+                        },
                     }
                 } else {
                     vec![0.0; input_number]
                 }
             },
-            |_features, _action, _reward| {
-                println!("Received features: {:?}, action: {}, reward: {}", _features, _action, _reward);
-                (0.0, true)},
+            |_features, _action, _counter| {
+                println!("Received features: {:?}, action: {}, counter: {}",
+                    _features, _action, _counter);
+                (0.0, true)
+            },
             aixker_rlt::RunningMode::Infer,
             &config.model_name,
         )
@@ -317,7 +318,10 @@ async fn run_infer(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let config_path = cli.config.clone().or_else(|| Some("Config.toml".to_string()));
+    let config_path = cli
+        .config
+        .clone()
+        .or_else(|| Some("Config.toml".to_string()));
 
     println!("AIXKER-RLT CLI invoked with log level: {:?}", cli.log_level);
     if let Some(config_path) = &config_path {
