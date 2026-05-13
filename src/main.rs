@@ -278,7 +278,9 @@ async fn run_infer(
                     vec![0.0; input_number]
                 }
             },
-            |_features, _action, _reward| (0.0, true),
+            |_features, _action, _reward| {
+                println!("Received features: {:?}, action: {}, reward: {}", _features, _action, _reward);
+                (0.0, true)},
             aixker_rlt::RunningMode::Infer,
             &config.model_name,
         )
