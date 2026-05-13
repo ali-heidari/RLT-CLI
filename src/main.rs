@@ -1,11 +1,14 @@
 mod cli;
 mod providers;
+mod reward_factory;
 
 use clap::Parser;
 use cli::commands::{InferArgs, TrainArgs};
 use cli::{Cli, Commands};
 use providers::csv_dataset::open_csv_dataset;
+use reward_factory::RewardFactory;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 fn load_config(
@@ -14,7 +17,8 @@ fn load_config(
 ) -> Result<aixker_rlt::configurations::Configurations, Box<dyn std::error::Error>> {
     if let Some(path) = config_path {
         let config_str = fs::read_to_string(path)?;
-        let mut config: aixker_rlt::configurations::Configurations = toml::from_str(&config_str)?;
+        let value: toml::Value = toml::from_str(&config_str)?;
+        let mut config: aixker_rlt::configurations::Configurations = value.clone().try_into()?;
         config.mode = default_mode;
         Ok(config)
     } else {
@@ -41,6 +45,21 @@ fn load_dataset_path(
         let value: toml::Value = toml::from_str(&config_str)?;
         Ok(value
             .get("dataset")
+            .and_then(|v| v.as_str())
+            .map(String::from))
+    } else {
+        Ok(None)
+    }
+}
+
+fn load_reward_script_path(
+    config_path: Option<&String>,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    if let Some(path) = config_path {
+        let config_str = fs::read_to_string(path)?;
+        let value: toml::Value = toml::from_str(&config_str)?;
+        Ok(value
+            .get("reward_script")
             .and_then(|v| v.as_str())
             .map(String::from))
     } else {
@@ -104,14 +123,25 @@ async fn run_train(
     }
 
     let config_dataset = load_dataset_path(config_path)?;
+    let config_reward_script = load_reward_script_path(config_path)?;
     let dataset_path = args
         .dataset
         .clone()
         .or(config_dataset)
         .ok_or("dataset must be set in config.toml or via --dataset")?;
 
+    let reward_script_path = args.reward_script.clone().or(config_reward_script);
+    println!(
+        "  reward script: {}",
+        reward_script_path
+            .as_deref()
+            .unwrap_or("<disabled>")
+    );
+
+    let reward_factory = RewardFactory::new(reward_script_path.as_ref().map(PathBuf::from));
+
     let dataset = open_csv_dataset(&dataset_path)?;
-    let cloned_dataset= Arc::new(std::sync::Mutex::new(dataset));
+    let cloned_dataset = Arc::new(std::sync::Mutex::new(dataset));
     println!("Opened CSV dataset stream from {}", dataset_path);
 
     if let Some(first_row) = cloned_dataset.lock().unwrap().next() {
@@ -125,19 +155,16 @@ async fn run_train(
     aixker_rlt::initialize(config.clone());
     aixker_rlt::node::Node::start(
         move |_lowest_state| {
-            let a= if let Some(row_result) = cloned_dataset.lock().unwrap().next() {
+             if let Some(row_result) = cloned_dataset.lock().unwrap().next() {
                 match row_result {
                     Ok(row) => row.into_iter().map(|x| x as f32).collect(),
                     Err(_) => vec![0.0; input_number],
                 }
             } else {
                 vec![0.0; input_number]
-            };
-
-            print!("Features for training: {:?}", a);
-            a
+            }
         },
-        |_features, _action, _reward| (0.0, true), // dummy reward
+        move |features, action, reward| reward_factory.evaluate(features, action, reward),
         aixker_rlt::RunningMode::Training,
         &config.model_name,
     )
