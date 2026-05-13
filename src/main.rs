@@ -256,14 +256,57 @@ async fn run_infer(
     }
     let config = Arc::new(config);
 
+    // Determine which data provider to use based on file extension
+    let is_python_script = dataset_path.ends_with(".py");
+
     aixker_rlt::initialize(config.clone());
-    aixker_rlt::node::Node::start(
-        |_lowest_state| vec![0.0; 8],
-        |_features, _action, _reward| (0.0, true),
-        aixker_rlt::RunningMode::Infer,
-        &config.model_name,
-    )
-    .await;
+
+    if is_python_script {
+        println!("Using Python script data provider from {}", dataset_path);
+        let provider = open_python_script(&dataset_path)?;
+        let cloned_provider = Arc::new(std::sync::Mutex::new(provider));
+        let input_number = config.input_number as usize;
+
+        aixker_rlt::node::Node::start(
+            move |_lowest_state| {
+                if let Some(row_result) = cloned_provider.lock().unwrap().next() {
+                    match row_result {
+                        Ok(row) => row.into_iter().map(|x| x as f32).collect(),
+                        Err(_) => vec![0.0; input_number],
+                    }
+                } else {
+                    vec![0.0; input_number]
+                }
+            },
+            |_features, _action, _reward| (0.0, true),
+            aixker_rlt::RunningMode::Infer,
+            &config.model_name,
+        )
+        .await;
+    } else {
+        let provider = open_csv_dataset(&dataset_path)?;
+        let cloned_provider = Arc::new(std::sync::Mutex::new(provider));
+        let input_number = config.input_number as usize;
+
+        println!("Using CSV data provider from {}", dataset_path);
+
+        aixker_rlt::node::Node::start(
+            move |_lowest_state| {
+                if let Some(row_result) = cloned_provider.lock().unwrap().next() {
+                    match row_result {
+                        Ok(row) => row.into_iter().map(|x| x as f32).collect(),
+                        Err(_) => vec![0.0; input_number],
+                    }
+                } else {
+                    vec![0.0; input_number]
+                }
+            },
+            |_features, _action, _reward| (0.0, true),
+            aixker_rlt::RunningMode::Infer,
+            &config.model_name,
+        )
+        .await;
+    }
 
     println!("Inference completed.");
     Ok(())

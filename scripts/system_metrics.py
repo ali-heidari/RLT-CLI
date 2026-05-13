@@ -66,10 +66,14 @@ def get_system_metrics():
 def main():
     try:
         metrics = get_system_metrics()
+        metrics.insert(0, 0.0)  # Prepend a dummy feature for compatibility
+        metrics.insert(0, 0.0)  # Prepend a dummy feature for compatibility
+        metrics.insert(0, 0.0)  # Prepend a dummy feature for compatibility
+        metrics.insert(0, 0.0)  # Prepend a dummy feature for compatibility
         # Output as JSON array
         print(json.dumps(metrics))
     except Exception as e:
-        print(json.dumps([0.0] * 8), file=sys.stderr)
+        print(json.dumps([0.0] * 12), file=sys.stderr)
         sys.exit(1)
 
 

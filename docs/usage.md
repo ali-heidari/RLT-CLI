@@ -64,9 +64,9 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
 
 ### Infer Subcommand
 - `--dataset PATH`
-  - **Required**. Path to the data source (CSV file or Python script) to specify which data context the inference is for.
+  - **Required**. Path to the data source (CSV file or Python script) to fetch features for inference.
     - Can be a CSV file (`*.csv`) or Python script (`*.py`).
-    - Used for logging and validation; inference operates on the model's learned behavior.
+    - Features are read from the data source and passed to the trained model for inference.
   - Must be set in `Config.toml` or via `--dataset`.
 - `--model-name NAME`
   - Checkpoint file name for the trained model to load. Default: `model.json`.

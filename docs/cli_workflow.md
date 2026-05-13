@@ -8,23 +8,26 @@ This document explains the `RLT-CLI` command flow and how the training, inferenc
 flowchart TD
     A[Start CLI] --> B{Command}
     B --> |train| C[Load config and dataset]
-    B --> |infer| D[Load config and model]
+    B --> |infer| D[Load config and dataset]
     B --> |export| E[Copy checkpoint file]
     C --> F{File extension}
+    D --> F
     F --> |.csv| G[Open CSV data provider]
     F --> |.py| H[Open Python script data provider]
-    G --> I{Reward script configured?}
+    G --> I{Train mode?}
     H --> I
-    I --> |yes| J[Validate reward script path]
-    I --> |no| K[Use default reward callback]
-    J --> L[Run Python reward script per sample]
-    L --> M[Supply reward and success to node]
-    K --> M
-    M --> N[Start training node]
-    N --> O[Training worker processes batches]
-    D --> P[Run inference on input features]
-    P --> Q[Print predicted action]
-    E --> R[Export model artifact]
+    I --> |yes| J{Reward script configured?}
+    I --> |no| K[Infer mode: pass features to model]
+    J --> |yes| L[Validate reward script path]
+    J --> |no| M[Use default reward callback]
+    L --> N[Run Python reward script per sample]
+    N --> O[Supply reward and success to node]
+    M --> O
+    O --> P[Start training node]
+    P --> Q[Training worker processes batches]
+    K --> R[Infer actions from features]
+    R --> S[Print predicted action]
+    E --> T[Export model artifact]
 ```
 
 ## Training path
@@ -42,9 +45,12 @@ flowchart TD
 
 ## Inference path
 
-1. `cargo run -- infer` loads the model and optionally parses input features.
-2. The model produces actions from the given feature vector.
-3. The CLI outputs the selected action.
+1. `cargo run -- infer` loads the model for inference.
+2. The data source is identified by file extension:
+   - `.csv`: Reads comma-separated feature vectors from a text file
+   - `.py`: Calls a Python script to fetch feature vectors on demand
+3. Features are fed to the model, which outputs actions based on its learned behavior.
+4. The CLI outputs the predicted action.
 
 ## Export path
 
