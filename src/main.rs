@@ -138,7 +138,26 @@ async fn run_train(
             .unwrap_or("<disabled>")
     );
 
-    let reward_factory = RewardFactory::new(reward_script_path.as_ref().map(PathBuf::from));
+    let reward_factory = if let Some(script_path) = reward_script_path {
+        let path = PathBuf::from(&script_path);
+        if !path.exists() {
+            return Err(format!(
+                "reward script path does not exist: {}",
+                path.display()
+            )
+            .into());
+        }
+        if !path.is_file() {
+            return Err(format!(
+                "reward script path is not a file: {}",
+                path.display()
+            )
+            .into());
+        }
+        RewardFactory::new(Some(path))
+    } else {
+        RewardFactory::new(None)
+    };
 
     let dataset = open_csv_dataset(&dataset_path)?;
     let cloned_dataset = Arc::new(std::sync::Mutex::new(dataset));

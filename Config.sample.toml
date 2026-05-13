@@ -10,6 +10,6 @@ hidden_layers=16
 reply_capacity=4096
 dataset = "./data/train.csv"
 model_name="model-128.json"
-reward_script="./reward_script.py"
+reward_script="./scripts/reward_script.py"
 log_interval=64
 mode="Infer"
