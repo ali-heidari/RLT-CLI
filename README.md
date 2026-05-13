@@ -8,6 +8,30 @@ A lightweight Rust command-line interface for Aixker-RLT model training and expo
 
 This release adds a Python reward factory: training can now call a user-provided Python script for reward computation. The script receives feature and action data on stdin and returns JSON containing `reward` and `success`.
 
+## CLI workflow
+
+The `RLT-CLI` workflow is:
+
+```mermaid
+flowchart TD
+    A[Start CLI] --> B{Command}
+    B --> |train| C[Load config and dataset]
+    B --> |infer| D[Load model and infer]
+    B --> |export| E[Copy checkpoint file]
+    C --> F{Reward script?}
+    F --> |yes| G[Validate script path]
+    G --> H[Run Python reward script per sample]
+    F --> |no| I[Use default reward]
+    H --> J[Start training node]
+    I --> J
+    D --> K[Infer actions]
+    J --> L[Background training worker]
+    K --> M[Print action]
+    E --> N[Export output]
+```
+
+See `docs/cli_workflow.md` for a detailed diagram and explanation.
+
 ## Features
 
 - `train` subcommand for starting model training
