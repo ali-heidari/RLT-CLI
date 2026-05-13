@@ -35,6 +35,10 @@ pub struct TrainArgs {
     /// Name of the model checkpoint file to use or write
     #[arg(long, value_name = "NAME")]
     pub model_name: Option<String>,
+
+    /// Path to a Python reward script that computes reward and success values
+    #[arg(long, value_name = "PATH")]
+    pub reward_script: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
