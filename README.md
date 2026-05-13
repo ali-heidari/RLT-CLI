@@ -6,6 +6,8 @@ A lightweight Rust command-line interface for Aixker-RLT model training and expo
 
 `RLT-CLI` provides a simple CLI wrapper around AIXKER-RLT concepts for training reinforcement learning models and exporting trained artifacts.
 
+This release adds a Python reward factory: training can now call a user-provided Python script for reward computation. The script receives feature and action data on stdin and returns JSON containing `reward` and `success`.
+
 ## Features
 
 - `train` subcommand for starting model training
@@ -25,6 +27,10 @@ cargo build --release
 
 ```bash
 cargo run -- train --dataset ./data/train --epochs 20 --batch-size 64 --learning-rate 0.001 --model-name my-model.json
+```
+
+```bash
+cargo run -- train --dataset ./data/train --epochs 20 --batch-size 64 --learning-rate 0.001 --model-name my-model.json --reward-script ./reward_script.py
 ```
 
 ```bash

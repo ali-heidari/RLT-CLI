@@ -51,6 +51,9 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
   - Validate and print the resolved training settings without actually running model training.
 - `--model-name NAME`
   - Checkpoint file name for the trained model. Default: `model.json`.
+- `--reward-script PATH`
+  - Optional Python script used to compute reward and success for each training sample.
+    The script receives a JSON request on stdin and returns a JSON response on stdout.
 
 ### Infer Subcommand
 - `--model-name NAME`
