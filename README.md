@@ -1,6 +1,6 @@
 # RLT-CLI
 
-A lightweight Rust command-line interface for Aixker-RLT model training and export workflows.
+A lightweight Rust command-line interface for @ali-heidari/Aixker-RLT model training and export workflows.
 
 ## Overview
 
@@ -8,7 +8,7 @@ A lightweight Rust command-line interface for Aixker-RLT model training and expo
 
 This release adds two major features:
 
-1. **Python reward factory**: Training can call a user-provided Python script for reward computation. The script receives feature and action data on stdin and returns JSON containing `reward` and `success`.
+1. **Python reward factory**: Training can call a user-provided Python script for reward computation. The script receives feature and action data on stdin and returns JSON containing `reward` and [...]
 
 2. **Python data providers**: Training can fetch feature vectors from a Python script on demand, enabling integration with system metrics, sensors, simulations, or other dynamic data sources.
 
@@ -71,11 +71,11 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
 
 ### Dry Run
 
-Use `--dry-run` with `train` to validate CLI arguments and show the configured settings without actually starting training. This is useful for confirming your dataset path, hyperparameters, and model name before running a long job.
+Use `--dry-run` with `train` to validate CLI arguments and show the configured settings without actually starting training. This is useful for confirming your dataset path, hyperparameters, and mo[...]
 
 ### Configuration
 
-You can provide a TOML configuration file using `--config Config.toml` to set default values. Command-line flags will override the config file settings. See `Config.toml` for a sample configuration.
+You can provide a TOML configuration file using `--config Config.toml` to set default values. Command-line flags will override the config file settings. See `Config.toml` for a sample configuratio[...]
 
 ## Documentation
 
@@ -103,7 +103,7 @@ This repository follows the `ai-agent-standards` conventions. The AI agent guida
 
 Apache-2.0
 
-This repository follows the `ai-agent-standards` instruction conventions. The main AI agent guidance is documented in `copilot-instructions.md`, and the shared standard files are available from the `ai-agent-standards` repository.
+This repository follows the `ai-agent-standards` instruction conventions. The main AI agent guidance is documented in `copilot-instructions.md`, and the shared standard files are available from t[...]
 
 For more usage information, see the docs index:
 - `docs/index.md`
