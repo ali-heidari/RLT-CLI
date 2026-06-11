@@ -13,3 +13,6 @@ model_name="model-128.json"
 reward_script="./scripts/reward_script.py"
 log_interval=64
 mode="Infer"
+# Optional compute backend: "Cpu" (default) or "Gpu".
+# The --backend CLI flag takes precedence over this value.
+# backend="Gpu"

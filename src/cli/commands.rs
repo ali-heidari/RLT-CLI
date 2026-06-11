@@ -39,6 +39,10 @@ pub struct TrainArgs {
     /// Path to a Python reward script that computes reward and success values
     #[arg(long, value_name = "PATH")]
     pub reward_script: Option<String>,
+
+    /// Compute backend to run on (overrides the config file; defaults to cpu)
+    #[arg(long, value_enum)]
+    pub backend: Option<Backend>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -50,6 +54,10 @@ pub struct InferArgs {
     /// Name of the model checkpoint file to load for inference
     #[arg(long, value_name = "NAME")]
     pub model_name: Option<String>,
+
+    /// Compute backend to run on (overrides the config file; defaults to cpu)
+    #[arg(long, value_enum)]
+    pub backend: Option<Backend>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -65,6 +73,24 @@ pub struct ExportArgs {
     /// Export format for the model
     #[arg(long, value_enum, default_value_t = ExportFormat::Json)]
     pub format: ExportFormat,
+}
+
+/// Compute backend selection for training and inference.
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum Backend {
+    /// Pure-Rust ndarray implementation (default)
+    Cpu,
+    /// wgpu compute shaders; falls back to CPU when no adapter is found
+    Gpu,
+}
+
+impl From<Backend> for aixker_rlt::ComputeBackend {
+    fn from(b: Backend) -> Self {
+        match b {
+            Backend::Cpu => aixker_rlt::ComputeBackend::Cpu,
+            Backend::Gpu => aixker_rlt::ComputeBackend::Gpu,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]

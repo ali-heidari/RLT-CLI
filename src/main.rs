@@ -34,6 +34,7 @@ fn load_config(
             model_name: String::new(),
             log_interval: 64,
             mode: default_mode,
+            backend: Default::default(),
         })
     }
 }
@@ -81,6 +82,9 @@ fn override_train_config(
     if let Some(model_name) = &args.model_name {
         config.model_name = model_name.clone();
     }
+    if let Some(backend) = args.backend {
+        config.backend = backend.into();
+    }
 }
 
 fn override_infer_config(
@@ -89,6 +93,9 @@ fn override_infer_config(
 ) {
     if let Some(model_name) = &args.model_name {
         config.model_name = model_name.clone();
+    }
+    if let Some(backend) = args.backend {
+        config.backend = backend.into();
     }
 }
 
@@ -109,6 +116,12 @@ async fn run_train(
     println!(
         "  model name: {}",
         args.model_name.as_deref().unwrap_or("<from config>")
+    );
+    println!(
+        "  backend: {}",
+        args.backend
+            .map(|b| format!("{:?}", b).to_lowercase())
+            .unwrap_or_else(|| "<from config, default cpu>".to_string())
     );
     println!("  dry run: {}", args.dry_run);
 
@@ -242,6 +255,12 @@ async fn run_infer(
         "  model name: {}",
         args.model_name.as_deref().unwrap_or("<from config>")
     );
+    println!(
+        "  backend: {}",
+        args.backend
+            .map(|b| format!("{:?}", b).to_lowercase())
+            .unwrap_or_else(|| "<from config, default cpu>".to_string())
+    );
 
     let mut config = load_config(config_path, aixker_rlt::RunningMode::Infer)?;
     override_infer_config(&mut config, &args);
@@ -315,9 +334,29 @@ async fn run_infer(
     Ok(())
 }
 
+fn init_logger(level: cli::LogLevel) {
+    let filter = match level {
+        cli::LogLevel::Error => log::LevelFilter::Error,
+        cli::LogLevel::Warn => log::LevelFilter::Warn,
+        cli::LogLevel::Info => log::LevelFilter::Info,
+        cli::LogLevel::Debug => log::LevelFilter::Debug,
+        cli::LogLevel::Trace => log::LevelFilter::Trace,
+    };
+    let mut builder = env_logger::Builder::from_default_env();
+    builder.filter_level(filter);
+    // wgpu internals are noisy at warn level; only surface them when debugging.
+    if filter < log::LevelFilter::Debug {
+        builder
+            .filter_module("wgpu_hal", log::LevelFilter::Error)
+            .filter_module("wgpu_core", log::LevelFilter::Error);
+    }
+    builder.init();
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    init_logger(cli.log_level);
     let config_path = cli
         .config
         .clone()
