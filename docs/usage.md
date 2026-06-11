@@ -47,12 +47,21 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
 ## Parameters
 
 ### Global Options
-- `--log-level [error|warn|info|debug|trace]`
-  - Sets the CLI logging verbosity.
+
+- `--log-level [silent|error|warn|info|debug|trace]`
+  - Sets the CLI logging verbosity. Default: `info`.
+- `-v`, `--verbose`
+  - Verbose log output (`debug` level). Overrides `--log-level`.
+- `-q`, `--silent` (alias: `--quiet`)
+  - Suppresses all log output and the CLI banner. Overrides `--log-level`.
+- `--errors-only`
+  - Only prints error logs. Overrides `--log-level`.
+- The three convenience flags are mutually exclusive.
 - `--config FILE`
   - Path to a TOML configuration file to override default settings. Command-line flags take precedence over config file values. See `Config.toml` for a sample configuration.
 
 ### Train Subcommand
+
 - `--dataset PATH`
   - Path to the training dataset file. Can be either a CSV file (`*.csv`) or a Python script (`*.py`).
     - **CSV**: Each line is parsed as comma-separated floats representing feature vectors.
@@ -79,6 +88,7 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
     file; the flag takes precedence.
 
 ### Infer Subcommand
+
 - `--dataset PATH`
   - **Required**. Path to the data source (CSV file or Python script) to fetch features for inference.
     - Can be a CSV file (`*.csv`) or Python script (`*.py`).
@@ -90,6 +100,7 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
   - Compute backend for inference. Default: `cpu`. See the train subcommand for details.
 
 ### Export Subcommand
+
 - `--checkpoint PATH`
   - Input checkpoint path for the trained model. Default: `./checkpoints/latest.json`.
 - `--output PATH`

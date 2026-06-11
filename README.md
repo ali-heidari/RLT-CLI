@@ -43,7 +43,7 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
 - `export` subcommand for exporting trained models
 - CPU or GPU compute via `--backend [cpu|gpu]` (CPU default; GPU via wgpu, no CUDA needed)
 - Python reward factory and Python data provider integration
-- Global options for configuration files and logging level
+- Global options for configuration files and logging level (`--verbose`, `--silent`, `--errors-only`, or fine-grained `--log-level`)
 - Built in Rust with `clap` for command parsing
 
 ## Getting Started
