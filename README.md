@@ -48,11 +48,50 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
 
 ## Getting Started
 
-### Build
+### Build (Linux / macOS)
 
 ```bash
 cargo build --release
 ```
+
+The binary is produced at `target/release/RLT-CLI`.
+
+### Build (Windows)
+
+1. Install Rust via [rustup](https://rustup.rs/) (use the default
+   `x86_64-pc-windows-msvc` toolchain; it requires the
+   [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+   with the "Desktop development with C++" workload).
+2. Build from PowerShell or `cmd`:
+
+```powershell
+cargo build --release
+```
+
+The binary is produced at `target\release\RLT-CLI.exe`:
+
+```powershell
+.\target\release\RLT-CLI.exe train --dataset .\sample-data\vmCloud_data.csv --model-name my-model.json
+```
+
+Windows notes:
+
+- **Python features** (`--dataset *.py`, `--reward-script`): install
+  [Python](https://www.python.org/downloads/windows/) and check *"Add python.exe
+  to PATH"* in the installer. The CLI tries `python3` first and falls back to
+  `python` automatically.
+- **GPU backend** (`--backend gpu`): works out of the box through wgpu's DX12
+  (or Vulkan) backend on NVIDIA, AMD, and Intel GPUs — no CUDA required.
+
+#### Cross-compiling for Windows from Linux
+
+```bash
+rustup target add x86_64-pc-windows-gnu
+sudo apt install mingw-w64        # Debian/Ubuntu
+cargo build --release --target x86_64-pc-windows-gnu
+```
+
+The binary is produced at `target/x86_64-pc-windows-gnu/release/RLT-CLI.exe`.
 
 ### Run
 

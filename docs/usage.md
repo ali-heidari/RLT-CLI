@@ -8,6 +8,10 @@
 cargo build --release
 ```
 
+Works the same on Windows (`target\release\RLT-CLI.exe`); see the
+[README "Build (Windows)" section](../README.md#build-windows) for toolchain
+setup, Python-on-PATH notes, and cross-compilation from Linux.
+
 ## Run
 
 ```bash
