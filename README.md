@@ -1,16 +1,16 @@
 # RLT-CLI
 
-A lightweight Rust command-line interface for @ali-heidari/Aixker-RLT model training and export workflows.
+A lightweight Rust command-line interface for [@ali-heidari/Aixker-RLT](https://github.com/ali-heidari/Aixker-RLT) model training, inference, and export workflows.
 
 ## Overview
 
-`RLT-CLI` provides a simple CLI wrapper around AIXKER-RLT concepts for training reinforcement learning models and exporting trained artifacts.
+`RLT-CLI` provides a simple CLI wrapper around AIXKER-RLT concepts for training reinforcement learning models, running inference, and exporting trained artifacts.
 
-This release adds two major features:
+It supports two Python integration points:
 
-1. **Python reward factory**: Training can call a user-provided Python script for reward computation. The script receives feature and action data on stdin and returns JSON containing `reward` and [...]
+1. **Python reward factory**: Training can call a user-provided Python script for reward computation. The script receives feature and action data on stdin and returns JSON containing `reward`.
 
-2. **Python data providers**: Training can fetch feature vectors from a Python script on demand, enabling integration with system metrics, sensors, simulations, or other dynamic data sources.
+2. **Python data providers**: Training and inference can fetch feature vectors from a Python script on demand, enabling integration with system metrics, sensors, simulations, or other dynamic data sources.
 
 ## CLI workflow
 
@@ -34,12 +34,14 @@ flowchart TD
     E --> N[Export output]
 ```
 
-See `docs/cli_workflow.md` for a detailed diagram and explanation.
+See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and explanation.
 
 ## Features
 
 - `train` subcommand for starting model training
+- `infer` subcommand for running inference against a trained model
 - `export` subcommand for exporting trained models
+- Python reward factory and Python data provider integration
 - Global options for configuration files and logging level
 - Built in Rust with `clap` for command parsing
 
@@ -53,17 +55,25 @@ cargo build --release
 
 ### Run
 
-```bash
-cargo run -- train --dataset ./data/train.csv --epochs 20 --batch-size 64 --learning-rate 0.001 --model-name my-model.json
-```
+Train from a CSV dataset:
 
 ```bash
-cargo run -- train --dataset ./system_metrics.py --epochs 20 --batch-size 64 --model-name my-model.json --reward-script ./reward_script.py
+cargo run -- train --dataset ./sample-data/vmCloud_data.csv --epochs 20 --batch-size 64 --learning-rate 0.001 --model-name my-model.json
 ```
 
+Train using a Python data provider and a Python reward script:
+
 ```bash
-cargo run -- infer --dataset ./data/train.csv --model-name my-model.json
+cargo run -- train --dataset ./scripts/system_metrics.py --epochs 20 --batch-size 64 --model-name my-model.json --reward-script ./scripts/reward_script.py
 ```
+
+Run inference:
+
+```bash
+cargo run -- infer --dataset ./sample-data/vmCloud_data.csv --model-name my-model.json
+```
+
+Export a trained model:
 
 ```bash
 cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/model.json --format json
@@ -71,43 +81,41 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
 
 ### Dry Run
 
-Use `--dry-run` with `train` to validate CLI arguments and show the configured settings without actually starting training. This is useful for confirming your dataset path, hyperparameters, and mo[...]
+Use `--dry-run` with `train` to validate CLI arguments and show the configured settings without actually starting training. This is useful for confirming your dataset path, hyperparameters, and model name before committing to a full run.
 
 ### Configuration
 
-You can provide a TOML configuration file using `--config Config.toml` to set default values. Command-line flags will override the config file settings. See `Config.toml` for a sample configuratio[...]
-
-## Documentation
-
-For detailed usage instructions, troubleshooting common errors, and more information, see the [documentation](docs/index.md).
+You can provide a TOML configuration file using `--config Config.toml` to set default values. Command-line flags override config file settings. See [Config.sample.toml](Config.sample.toml) for a sample configuration.
 
 ## Project Structure
 
 - `Cargo.toml` — Rust package manifest
-- `src/main.rs` — CLI entry point and command definitions
-- `copilot-instructions.md` — agent usage instructions and standards reference
+- `src/main.rs` — CLI entry point
+- `src/cli/` — command definitions and argument parsing
+- `src/providers/` — CSV and Python-script data providers
+- `src/reward_factory.rs` — Python reward script integration
+- `scripts/` — sample Python reward and data-provider scripts
+- `sample-data/` — sample CSV datasets
 - `docs/` — human-readable project documentation
+- `.agent/` — AI agent instructions and shared standards
 - `LICENSE` — project license
 
 ## Documentation
 
-This repository includes a `docs/` folder containing Markdown documentation for users and maintainers.
+For detailed usage instructions, troubleshooting, and feature guides, see the [documentation index](docs/index.md):
+
+- [usage.md](docs/usage.md)
+- [cli_workflow.md](docs/cli_workflow.md)
+- [reward_factory.md](docs/reward_factory.md)
+- [data_providers.md](docs/data_providers.md)
+- [troubleshooting.md](docs/troubleshooting.md)
 
 ## Standards
 
-This repository follows the `ai-agent-standards` conventions. The AI agent guidance is documented in `copilot-instructions.md`, and the shared standard files are available at:
+This repository follows the `ai-agent-standards` conventions. The AI agent guidance is documented in [.agent/agent-instructions.md](.agent/agent-instructions.md), and the shared standard files are available at:
 
-- `https://github.com/ali-heidari/ai-agent-standards`
+- [ali-heidari/ai-agent-standards](https://github.com/ali-heidari/ai-agent-standards)
 
 ## License
 
 Apache-2.0
-
-This repository follows the `ai-agent-standards` instruction conventions. The main AI agent guidance is documented in `copilot-instructions.md`, and the shared standard files are available from t[...]
-
-For more usage information, see the docs index:
-- `docs/index.md`
-
-See also:
-- `copilot-instructions.md`
-- `https://github.com/ali-heidari/ai-agent-standards`
