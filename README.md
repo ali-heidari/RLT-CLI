@@ -41,6 +41,7 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
 - `train` subcommand for starting model training
 - `infer` subcommand for running inference against a trained model
 - `export` subcommand for exporting trained models
+- CPU or GPU compute via `--backend [cpu|gpu]` (CPU default; GPU via wgpu, no CUDA needed)
 - Python reward factory and Python data provider integration
 - Global options for configuration files and logging level
 - Built in Rust with `clap` for command parsing
@@ -78,6 +79,25 @@ Export a trained model:
 ```bash
 cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/model.json --format json
 ```
+
+### Choosing CPU or GPU
+
+Training and inference run on the **CPU by default**. Add `--backend gpu` to run
+the neural network on the GPU (any wgpu-supported adapter — NVIDIA, AMD, Intel,
+Apple Silicon; no CUDA required):
+
+```bash
+cargo run -- train --dataset ./sample-data/vmCloud_data.csv --model-name my-model.json --backend gpu
+```
+
+```bash
+cargo run -- infer --dataset ./sample-data/vmCloud_data.csv --model-name my-model.json --backend gpu
+```
+
+If no compatible GPU is found, the run falls back to CPU with a warning instead
+of failing. The backend can also be set in the config file (`backend = "Gpu"`);
+the CLI flag takes precedence. Model checkpoints are backend-agnostic — you can
+train on GPU and infer on CPU with the same file.
 
 ### Dry Run
 

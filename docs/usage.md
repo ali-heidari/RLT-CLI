@@ -30,6 +30,12 @@ cargo run -- infer --dataset ./data/train.csv --model-name my-model.json
 cargo run -- infer --dataset ./system_metrics.py --model-name my-model.json
 ```
 
+Train or infer on the GPU instead of the CPU (default):
+
+```bash
+cargo run -- train --dataset ./data/train.csv --model-name my-model.json --backend gpu
+```
+
 ```bash
 cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/model.json --format json
 ```
@@ -61,6 +67,12 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
 - `--reward-script PATH`
   - Optional Python script used to compute reward and success for each training sample.
     The script receives a JSON request on stdin and returns a JSON response on stdout.
+- `--backend [cpu|gpu]`
+  - Compute backend for the neural network math. Default: `cpu` (pure-Rust `ndarray`).
+    `gpu` runs training on wgpu compute shaders (Vulkan/Metal/DX12 — NVIDIA, AMD, Intel,
+    Apple Silicon; no CUDA required) and falls back to CPU with a warning if no
+    compatible adapter is found. Can also be set with `backend = "Gpu"` in the config
+    file; the flag takes precedence.
 
 ### Infer Subcommand
 - `--dataset PATH`
@@ -70,6 +82,8 @@ cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/mod
   - Must be set in `Config.toml` or via `--dataset`.
 - `--model-name NAME`
   - Checkpoint file name for the trained model to load. Default: `model.json`.
+- `--backend [cpu|gpu]`
+  - Compute backend for inference. Default: `cpu`. See the train subcommand for details.
 
 ### Export Subcommand
 - `--checkpoint PATH`
