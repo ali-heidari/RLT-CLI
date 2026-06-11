@@ -95,6 +95,8 @@ impl From<Backend> for aixker_rlt::ComputeBackend {
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum LogLevel {
+    /// No log output at all
+    Silent,
     Error,
     Warn,
     Info,

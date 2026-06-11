@@ -334,8 +334,23 @@ async fn run_infer(
     Ok(())
 }
 
+/// Resolve the effective log level from --log-level and the
+/// convenience flags (--verbose / --silent / --errors-only).
+fn effective_log_level(cli: &Cli) -> cli::LogLevel {
+    if cli.verbose {
+        cli::LogLevel::Debug
+    } else if cli.silent {
+        cli::LogLevel::Silent
+    } else if cli.errors_only {
+        cli::LogLevel::Error
+    } else {
+        cli.log_level
+    }
+}
+
 fn init_logger(level: cli::LogLevel) {
     let filter = match level {
+        cli::LogLevel::Silent => log::LevelFilter::Off,
         cli::LogLevel::Error => log::LevelFilter::Error,
         cli::LogLevel::Warn => log::LevelFilter::Warn,
         cli::LogLevel::Info => log::LevelFilter::Info,
@@ -356,15 +371,18 @@ fn init_logger(level: cli::LogLevel) {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    init_logger(cli.log_level);
+    let log_level = effective_log_level(&cli);
+    init_logger(log_level);
     let config_path = cli
         .config
         .clone()
         .or_else(|| Some("Config.toml".to_string()));
 
-    println!("AIXKER-RLT CLI invoked with log level: {:?}", cli.log_level);
-    if let Some(config_path) = &config_path {
-        println!("Using config file: {}", config_path);
+    if !cli.silent {
+        println!("AIXKER-RLT CLI invoked with log level: {:?}", log_level);
+        if let Some(config_path) = &config_path {
+            println!("Using config file: {}", config_path);
+        }
     }
 
     match cli.command {
