@@ -311,13 +311,25 @@ claims that nothing verified before this workflow existed.
 
 For detailed usage instructions, troubleshooting, and feature guides, see the [documentation index](docs/index.md):
 
-- [usage.md](docs/usage.md)
+- [init.md](docs/init.md) — the quickstart in full
+- [usage.md](docs/usage.md) — every command and flag
+- [eval.md](docs/eval.md) — scoring a checkpoint against a baseline
 - [cli_workflow.md](docs/cli_workflow.md)
 - [reward_factory.md](docs/reward_factory.md)
 - [data_providers.md](docs/data_providers.md)
 - [troubleshooting.md](docs/troubleshooting.md)
 - [roadmap.md](docs/roadmap.md)
 - [found-issues.md](docs/found-issues.md) — issues in the upstream library
+
+## Contributing
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, the checks CI runs, and what good
+  looks like here
+- [CHANGELOG.md](CHANGELOG.md) — what has changed, and the versioning policy
+- [SECURITY.md](SECURITY.md) — reporting a vulnerability, and the script trust
+  model, which is the one thing worth reading before running `rlt` in a
+  directory you did not set up
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ## Standards
 
