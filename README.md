@@ -1,5 +1,7 @@
 # RLT-CLI
 
+[![CI](https://github.com/ali-heidari/RLT-CLI/actions/workflows/ci.yml/badge.svg)](https://github.com/ali-heidari/RLT-CLI/actions/workflows/ci.yml)
+
 A lightweight Rust command-line interface for [@ali-heidari/Aixker-RLT](https://github.com/ali-heidari/Aixker-RLT) model training, inference, and export workflows.
 
 ## Overview
@@ -57,6 +59,10 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
 - Built in Rust with `clap` for command parsing
 
 ## Getting Started
+
+Requires Rust **1.92** or newer. That floor comes from the dependency tree —
+`wgpu`, pulled in by the GPU backend — not from this crate; `cargo` reports it
+if your toolchain is older.
 
 ### Build (Linux / macOS)
 
@@ -208,8 +214,26 @@ without any config file. See [Config.sample.toml](Config.sample.toml).
 cargo test
 ```
 
-Unit tests cover CSV parsing, the data-source boundary, and config precedence.
-End-to-end tests drive the built binary in a temporary directory.
+Unit tests cover CSV parsing, the data-source boundary, response parsing, the
+JSONL action output, the Python worker's deadline and interpreter fallback, and
+config precedence. End-to-end tests drive the built binary in a temporary
+directory. The Python tests need an interpreter on `PATH`.
+
+### Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to
+`develop` and on every pull request:
+
+| Job | What it checks |
+| --- | --- |
+| Format and lint | `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` |
+| Test | `cargo test --locked --all-targets` on Linux, macOS, and Windows |
+| Build release | `cargo build --release --locked` on all three |
+
+`--locked` makes the committed `Cargo.lock` authoritative, so a build that would
+have needed to change it fails instead of drifting. The Windows leg matters
+most: the build instructions and the Python interpreter fallback above are
+claims that nothing verified before this workflow existed.
 
 ## Project Structure
 

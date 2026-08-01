@@ -2,6 +2,10 @@
 name = "RLT-CLI"
 version = "0.1.0"
 edition = "2021"
+# Set by the dependency tree rather than by this crate: wgpu 28, pulled in by
+# aixker-rlt's GPU backend, requires 1.92. Declaring it turns an obscure
+# dependency-resolution error into a clear "your toolchain is too old".
+rust-version = "1.92"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
