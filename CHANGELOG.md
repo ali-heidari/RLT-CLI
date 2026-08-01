@@ -76,10 +76,11 @@ Everything so far. There has been no tagged release yet.
 ### Known issues
 
 - **A trained policy currently decides no better than chance.** This is a
-  limitation of the pinned `aixker-rlt` revision, not of this CLI: learning is
-  far too weak at the hardcoded learning rate, and inference samples from the
-  action distribution rather than taking the best action. `rlt eval` reports it
-  honestly, which is what it is for. See
+  limitation of the pinned `aixker-rlt` revision, not of this CLI: training
+  drives the policy toward a constant action rather than an input-dependent
+  one. Selecting the best action instead of sampling was measured and scores
+  worse, so it is the learning rather than the action selection. `rlt eval`
+  reports the result honestly, which is what it is for. See
   [docs/found-issues.md](docs/found-issues.md) issue 8.
 - Checkpoint filenames are doubled (`m.json` becomes `models/m.json.m.json`),
   also upstream. The CLI reports the real path so the file can be found.

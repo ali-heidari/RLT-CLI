@@ -73,10 +73,10 @@ The baseline beats the policy.
 
 That is not a mistake in the scaffold, and training longer does not fix it —
 30× the batches gives 32.5%. It is a limitation in the `aixker-rlt` library,
-recorded in detail as [found-issues.md](found-issues.md) issue 8: learning is
-far too weak for the hardcoded learning rate, and inference *samples* from the
-action distribution rather than taking the best action, so even a well-ranked
-model would be crippled at decision time.
+recorded in detail as [found-issues.md](found-issues.md) issue 8: training
+drives the policy toward a constant action rather than one that depends on its
+input. Selecting the best action rather than sampling — the obvious suspect —
+was measured and scores *worse*, so the fault is in what training optimises.
 
 It is documented here rather than hidden because a quickstart that quietly
 showed a losing model would be worse, and because this is exactly the job

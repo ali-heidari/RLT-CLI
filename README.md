@@ -34,9 +34,11 @@ The baseline beats the policy.
 **Yes, that says the baseline wins.** On the library revision this CLI pins, a
 trained policy scores at chance on a rule a linear model should solve, and
 training 30× longer does not change it. The cause is upstream and documented in
-[docs/found-issues.md](docs/found-issues.md) issue 8: learning is far too weak
-at the hardcoded learning rate, and inference samples from the action
-distribution instead of taking the best action.
+[docs/found-issues.md](docs/found-issues.md) issue 8. The weights do move with
+training, but toward a policy that ignores its input: after 76,800 samples the
+model ranks the same action first for every row. Taking the best action instead
+of sampling was measured and makes it *worse*, so the fault is in what the
+updates optimise, not in how the action is chosen.
 
 It is printed here rather than hidden because a tool that tells you your model
 is not worth shipping is doing its job. See [docs/init.md](docs/init.md) for the
