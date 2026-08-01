@@ -6,11 +6,18 @@ A lightweight Rust command-line interface for [@ali-heidari/Aixker-RLT](https://
 
 `RLT-CLI` provides a simple CLI wrapper around AIXKER-RLT concepts for training reinforcement learning models, running inference, and exporting trained artifacts.
 
-It supports two Python integration points:
+It supports two Python integration points. In both cases the script is started
+**once** and exchanges one JSON line per request over its stdin/stdout:
 
-1. **Python reward factory**: Training can call a user-provided Python script for reward computation. The script receives feature and action data on stdin and returns JSON containing `reward`.
+1. **Python reward factory**: Training calls a user-provided Python script to
+   compute the reward for each step. The script receives `{"features": [...],
+   "action": N}` and replies `{"reward": <number>, "success": <bool>}`.
 
-2. **Python data providers**: Training and inference can fetch feature vectors from a Python script on demand, enabling integration with system metrics, sensors, simulations, or other dynamic data sources.
+2. **Python data providers**: Training and inference can fetch feature vectors
+   from a Python script on demand, for system metrics, sensors, simulations, or
+   other dynamic sources.
+
+You supply your own data; no dataset ships with this repository.
 
 ## CLI workflow
 
@@ -18,20 +25,17 @@ The `RLT-CLI` workflow is:
 
 ```mermaid
 flowchart TD
-    A[Start CLI] --> B{Command}
-    B --> |train| C[Load config and dataset]
-    B --> |infer| D[Load model and infer]
-    B --> |export| E[Copy checkpoint file]
-    C --> F{Reward script?}
-    F --> |yes| G[Validate script path]
-    G --> H[Run Python reward script per sample]
-    F --> |no| I[Use default reward]
-    H --> J[Start training node]
-    I --> J
-    D --> K[Infer actions]
-    J --> L[Background training worker]
-    K --> M[Print action]
-    E --> N[Export output]
+    A[Start CLI] --> B[Load config once, resolve flag > file > default]
+    B --> C{Command}
+    C --> |train| D[Validate dataset and scripts]
+    D --> E[Open CSV reader or start Python provider]
+    E --> F[Validate first row width]
+    F --> G[Node loop: features in, reward out]
+    G --> H[Stop when the data source is exhausted]
+    H --> I[Report rows read and skipped]
+    C --> |infer| J[Require a non-empty checkpoint]
+    J --> K[Emit an action per sample]
+    C --> |export| L[Copy the checkpoint verbatim]
 ```
 
 See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and explanation.
@@ -42,7 +46,12 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
 - `infer` subcommand for running inference against a trained model
 - `export` subcommand for exporting trained models
 - CPU or GPU compute via `--backend [cpu|gpu]` (CPU default; GPU via wgpu, no CUDA needed)
-- Python reward factory and Python data provider integration
+- Python reward factory and Python data provider integration, each backed by a
+  long-lived interpreter rather than a process per sample
+- CSV reading with `--has-header` and `--delimiter`, which reports unparseable
+  fields by line and column instead of silently substituting `0.0`
+- Clear setting precedence — flag, then config file, then default — with the
+  origin of every effective value printed at the start of a run
 - Global options for configuration files and logging level (`--verbose`, `--silent`, `--errors-only`, or fine-grained `--log-level`)
 - Built in Rust with `clap` for command parsing
 
@@ -71,7 +80,7 @@ cargo build --release
 The binary is produced at `target\release\RLT-CLI.exe`:
 
 ```powershell
-.\target\release\RLT-CLI.exe train --dataset .\sample-data\vmCloud_data.csv --model-name my-model.json
+.\target\release\RLT-CLI.exe train --dataset .\your-data.csv --model-name my-model.json
 ```
 
 Windows notes:
@@ -95,11 +104,15 @@ The binary is produced at `target/x86_64-pc-windows-gnu/release/RLT-CLI.exe`.
 
 ### Run
 
-Train from a CSV dataset:
+Train from a CSV dataset of your own. Every column must be numeric, and the
+number of columns must match `input_number` in the config file:
 
 ```bash
-cargo run -- train --dataset ./sample-data/vmCloud_data.csv --epochs 20 --batch-size 64 --learning-rate 0.001 --model-name my-model.json
+cargo run -- train --dataset ./your-data.csv --epochs 20 --batch-size 64 --model-name my-model.json
 ```
+
+Add `--has-header` if the first line holds column names, and `--delimiter` for
+anything other than a comma.
 
 Train using a Python data provider and a Python reward script:
 
@@ -110,13 +123,36 @@ cargo run -- train --dataset ./scripts/system_metrics.py --epochs 20 --batch-siz
 Run inference:
 
 ```bash
-cargo run -- infer --dataset ./sample-data/vmCloud_data.csv --model-name my-model.json
+cargo run -- infer --dataset ./your-data.csv --model-name my-model.json
 ```
 
 Export a trained model:
 
 ```bash
-cargo run -- export --checkpoint ./checkpoints/latest.pt --output ./exported/model.json --format json
+cargo run -- export --output ./exported/model.json
+```
+
+Note that `--format json` **copies** the checkpoint; checkpoints are already
+JSON and no conversion is performed.
+
+### Where checkpoints live
+
+Checkpoints are written under `./models/`. The file name currently repeats the
+model name — `--model-name my-model.json` produces
+`./models/my-model.json.my-model.json`. That doubling comes from the library
+(see [docs/found-issues.md](docs/found-issues.md)); the CLI reports the real
+path in its messages.
+
+### Settings precedence
+
+Command-line flag, then config file, then built-in default. Each run prints the
+effective settings and where each value came from:
+
+```text
+Starting training with the following settings:
+  dataset: ./your-data.csv (flag)
+  model name: my-model.json (Config.toml)
+  batch size: 32 (default)
 ```
 
 ### Choosing CPU or GPU
@@ -126,11 +162,11 @@ the neural network on the GPU (any wgpu-supported adapter — NVIDIA, AMD, Intel
 Apple Silicon; no CUDA required):
 
 ```bash
-cargo run -- train --dataset ./sample-data/vmCloud_data.csv --model-name my-model.json --backend gpu
+cargo run -- train --dataset ./your-data.csv --model-name my-model.json --backend gpu
 ```
 
 ```bash
-cargo run -- infer --dataset ./sample-data/vmCloud_data.csv --model-name my-model.json --backend gpu
+cargo run -- infer --dataset ./your-data.csv --model-name my-model.json --backend gpu
 ```
 
 If no compatible GPU is found, the run falls back to CPU with a warning instead
@@ -140,21 +176,36 @@ train on GPU and infer on CPU with the same file.
 
 ### Dry Run
 
-Use `--dry-run` with `train` to validate CLI arguments and show the configured settings without actually starting training. This is useful for confirming your dataset path, hyperparameters, and model name before committing to a full run.
+Use `--dry-run` with `train` to resolve and validate the configuration, print
+it, and exit without training. It fails if the dataset or reward script is
+missing, so it is a real check rather than a preview.
 
 ### Configuration
 
-You can provide a TOML configuration file using `--config Config.toml` to set default values. Command-line flags override config file settings. See [Config.sample.toml](Config.sample.toml) for a sample configuration.
+Provide a TOML configuration file with `--config Config.toml` to set defaults.
+Command-line flags override it. If no `--config` is given, `Config.toml` is used
+when present, and built-in defaults apply when it is not — a fresh clone runs
+without any config file. See [Config.sample.toml](Config.sample.toml).
+
+### Tests
+
+```bash
+cargo test
+```
+
+Unit tests cover CSV parsing, the data-source boundary, and config precedence.
+End-to-end tests drive the built binary in a temporary directory.
 
 ## Project Structure
 
 - `Cargo.toml` — Rust package manifest
-- `src/main.rs` — CLI entry point
+- `src/main.rs` — CLI entry point, config resolution, and command handlers
 - `src/cli/` — command definitions and argument parsing
-- `src/providers/` — CSV and Python-script data providers
+- `src/providers/` — CSV reader, Python provider, the long-lived Python worker,
+  and the feature-source boundary that validates rows
 - `src/reward_factory.rs` — Python reward script integration
 - `scripts/` — sample Python reward and data-provider scripts
-- `sample-data/` — sample CSV datasets
+- `tests/` — end-to-end tests for the CLI surface
 - `docs/` — human-readable project documentation
 - `.agent/` — AI agent instructions and shared standards
 - `LICENSE` — project license
@@ -168,6 +219,8 @@ For detailed usage instructions, troubleshooting, and feature guides, see the [d
 - [reward_factory.md](docs/reward_factory.md)
 - [data_providers.md](docs/data_providers.md)
 - [troubleshooting.md](docs/troubleshooting.md)
+- [roadmap.md](docs/roadmap.md)
+- [found-issues.md](docs/found-issues.md) — issues in the upstream library
 
 ## Standards
 

@@ -16,17 +16,13 @@ pub struct TrainArgs {
     #[arg(long, value_name = "PATH")]
     pub dataset: Option<String>,
 
-    /// Number of training epochs
-    #[arg(long, default_value_t = 10)]
-    pub epochs: u32,
+    /// Number of training epochs; one epoch is 100 training batches [default: 10]
+    #[arg(long)]
+    pub epochs: Option<u32>,
 
-    /// Batch size for training
-    #[arg(long, default_value_t = 32)]
-    pub batch_size: u32,
-
-    /// Initial learning rate
-    #[arg(long, default_value_t = 0.001)]
-    pub learning_rate: f32,
+    /// Batch size for training [default: 32]
+    #[arg(long)]
+    pub batch_size: Option<u32>,
 
     /// Enable dry-run mode without actually executing training
     #[arg(long, default_value_t = false)]
@@ -43,6 +39,14 @@ pub struct TrainArgs {
     /// Compute backend to run on (overrides the config file; defaults to cpu)
     #[arg(long, value_enum)]
     pub backend: Option<Backend>,
+
+    /// Skip the first CSV row instead of parsing it as data [default: false]
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
+    pub has_header: Option<bool>,
+
+    /// Field separator for CSV datasets [default: ,]
+    #[arg(long, value_name = "CHAR")]
+    pub delimiter: Option<char>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -58,13 +62,22 @@ pub struct InferArgs {
     /// Compute backend to run on (overrides the config file; defaults to cpu)
     #[arg(long, value_enum)]
     pub backend: Option<Backend>,
+
+    /// Skip the first CSV row instead of parsing it as data [default: false]
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
+    pub has_header: Option<bool>,
+
+    /// Field separator for CSV datasets [default: ,]
+    #[arg(long, value_name = "CHAR")]
+    pub delimiter: Option<char>,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct ExportArgs {
     /// Path to the trained model checkpoint
-    #[arg(long, value_name = "PATH", default_value = "./checkpoints/latest.json")]
-    pub checkpoint: String,
+    /// [default: the configured model under ./models]
+    #[arg(long, value_name = "PATH")]
+    pub checkpoint: Option<String>,
 
     /// Output path for the exported model
     #[arg(long, value_name = "PATH", default_value = "./exported/model.json")]
@@ -106,6 +119,8 @@ pub enum LogLevel {
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum ExportFormat {
+    /// Copy the checkpoint file as-is. Checkpoints are already JSON, so no
+    /// conversion is performed.
     Json,
-    // Add other formats as needed
+    // Real conversion targets (safetensors, onnx) are not implemented yet.
 }

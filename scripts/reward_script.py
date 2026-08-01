@@ -2,8 +2,17 @@
 """
 Sample reward script for RLT-CLI.
 
-This script reads a JSON object from stdin with `features` and `action`.
-It writes a JSON response with `reward` and `success`.
+RLT-CLI starts this script once and keeps it running. For every environment
+step it writes one JSON line to stdin:
+
+    {"features": [0.1, 0.2, ...], "action": 1}
+
+and expects exactly one JSON line back on stdout:
+
+    {"reward": 1.0, "success": true}
+
+`flush=True` is required: Python block-buffers stdout when it is a pipe, so
+without it the CLI would wait forever for a response sitting in that buffer.
 """
 
 import json
@@ -24,12 +33,17 @@ def evaluate_reward(features, action):
 
 
 def main():
-    request = json.load(sys.stdin)
-    features = request.get("features", [])
-    action = int(request.get("action", 0))
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
 
-    reward, success = evaluate_reward(features, action)
-    print(json.dumps({"reward": reward, "success": success}))
+        request = json.loads(line)
+        features = request.get("features", [])
+        action = int(request.get("action", 0))
+
+        reward, success = evaluate_reward(features, action)
+        print(json.dumps({"reward": reward, "success": success}), flush=True)
 
 
 if __name__ == "__main__":

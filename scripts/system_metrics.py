@@ -2,8 +2,15 @@
 """
 Sample system metrics provider for RLT-CLI.
 
-This script outputs system metrics as a JSON array.
-Useful for training RL models that respond to system state.
+RLT-CLI starts this script once and keeps it running. For every sample it
+writes one JSON request line to stdin (currently the empty object `{}`) and
+expects exactly one line back on stdout holding the feature vector, either as
+a JSON array or as comma-separated floats:
+
+    [0.12, 0.48, 0.03, ...]
+
+`flush=True` is required: Python block-buffers stdout when it is a pipe, so
+without it the CLI would wait forever for a response sitting in that buffer.
 """
 
 import json
@@ -139,12 +146,17 @@ def get_system_metrics():
 
 
 def main():
-    try:
-        metrics = get_system_metrics()
-        print(json.dumps(metrics))
-    except Exception as e:
-        print(json.dumps([0.0] * 12), file=sys.stderr)
-        sys.exit(1)
+    # One response per request line, for as long as RLT-CLI keeps asking.
+    for _request in sys.stdin:
+        try:
+            metrics = get_system_metrics()
+        except Exception as exc:
+            # Exit rather than emit fabricated zeros: the CLI reports the dead
+            # worker, which is honest, where a zero vector would be trained on.
+            print(f"failed to collect system metrics: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        print(json.dumps(metrics), flush=True)
 
 
 if __name__ == "__main__":

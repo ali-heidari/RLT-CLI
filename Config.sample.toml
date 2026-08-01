@@ -1,18 +1,68 @@
-# config.toml
-debug = false
+# Sample configuration for RLT-CLI.
+#
+# Copy to Config.toml and edit. Every key is optional: an absent key falls back
+# to the built-in default noted beside it. Command-line flags override this
+# file, and this file overrides the defaults.
+#
+# The config file itself is optional too — without one the CLI runs on the
+# built-in defaults.
 
+# --- Data ---------------------------------------------------------------
+
+# Data source. A ".py" path starts the Python script provider; anything else is
+# read as CSV. Supply your own data. Overridden by --dataset.
+dataset = "./your-data.csv"
+
+# Skip the first CSV row instead of parsing it as data. Overridden by
+# --has-header. Default: false
+has_header = false
+
+# CSV field separator; a single ASCII character. Overridden by --delimiter.
+# Default: ","
+delimiter = ","
+
+# --- Model --------------------------------------------------------------
+
+# Checkpoint name. Written under ./models/. Overridden by --model-name.
+model_name = "model-128.json"
+
+# Number of values in each row of your data. A mismatch is reported before
+# training starts. Default: 8
+input_number = 6
+
+# Number of actions the model can choose from. Default: 3
+output_number = 3
+
+# Hidden layer width. Default: 16
+hidden_layers = 16
+
+# --- Training -----------------------------------------------------------
+
+# Samples per training batch. Overridden by --batch-size. Default: 32
+batch_size = 128
+
+# Total training batches. The --epochs flag sets this as epochs x 100 and takes
+# precedence over this value. Default: 1000
+total_batches = 20000
+
+# Replay buffer capacity. Default: 4096
+reply_capacity = 4096
+
+# Python script computing reward and success per step. Overridden by
+# --reward-script. Optional; without it every reward is 0.0.
+reward_script = "./scripts/reward_script.py"
+
+# --- Runtime ------------------------------------------------------------
+
+# Seconds slept between samples during inference; training ignores it.
+# Set to 0 for batch inference over a file. Default: 10
 interval_secs = 10
-batch_size=128
-total_batches=20000
-input_number=6
-output_number=3
-hidden_layers=16
-reply_capacity=4096
-dataset = "./data/train.csv"
-model_name="model-128.json"
-reward_script="./scripts/reward_script.py"
-log_interval=64
-mode="Infer"
-# Optional compute backend: "Cpu" (default) or "Gpu".
-# The --backend CLI flag takes precedence over this value.
-# backend="Gpu"
+
+# How often the library logs a training footstep. Default: 64
+log_interval = 64
+
+# Compute backend: "Cpu" (default) or "Gpu". Overridden by --backend.
+# backend = "Gpu"
+
+# Note: a "mode" key has no effect — the subcommand decides whether the run
+# trains or infers. Unknown keys are ignored.
