@@ -76,7 +76,8 @@ reports the real path in its messages so you can always find the file.
 ### Global options
 
 - `--log-level [silent|error|warn|info|debug|trace]`
-  - Logging verbosity. Default: `info`.
+  - Logging verbosity. Default: `info`. `--log-level silent` is exactly
+    equivalent to `--silent`.
 - `-v`, `--verbose`
   - Debug-level logging. Overrides `--log-level`.
 - `-q`, `--silent` (alias `--quiet`)

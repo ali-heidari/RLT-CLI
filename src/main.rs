@@ -894,7 +894,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let log_level = effective_log_level(&cli);
     init_logger(log_level);
 
-    let out = Output::new(cli.silent);
+    // From the effective level, not the flag: `--log-level silent` documents
+    // itself as "no log output at all", and a banner it does not suppress makes
+    // the two spellings disagree. `--silent` resolves to Silent, so it still
+    // behaves the same.
+    let out = Output::new(matches!(log_level, cli::LogLevel::Silent));
     let (file_config, config_file) = load_file_config(cli.config.as_ref())?;
 
     out.line(format!(

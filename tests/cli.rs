@@ -406,6 +406,26 @@ fn silent_prints_nothing_at_all() {
 }
 
 #[test]
+fn log_level_silent_silences_the_command_too() {
+    // Regression: the two spellings disagreed. --silent suppressed the banner
+    // and settings block; --log-level silent, documented as "no log output at
+    // all", printed both.
+    let dir = workspace(30);
+
+    let output = rlt(&dir)
+        .args(["--log-level", "silent", "train", "--dataset", "./data.csv"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.stdout.is_empty() && output.stderr.is_empty(),
+        "--log-level silent leaked {} bytes of stdout and {} of stderr",
+        output.stdout.len(),
+        output.stderr.len()
+    );
+}
+
+#[test]
 fn dry_run_validates_the_configuration() {
     let dir = workspace(10);
 
