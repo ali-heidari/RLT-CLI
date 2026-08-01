@@ -393,9 +393,13 @@ mod tests {
 
     #[test]
     fn a_responsive_script_is_answered_within_the_deadline() {
+        // The deadline has to cover interpreter startup as well as the reply,
+        // so it uses the production default rather than a tight number: this is
+        // the one timing test whose failure mode would be a flake on a loaded
+        // CI runner rather than a real result.
         let (_dir, mut worker) = worker(
             "import sys\nfor line in sys.stdin:\n    print('[1, 2]', flush=True)\n",
-            Some(Duration::from_secs(10)),
+            Some(Duration::from_secs(30)),
         );
 
         assert_eq!(worker.request("{}").unwrap(), "[1, 2]");
