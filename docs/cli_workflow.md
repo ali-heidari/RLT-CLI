@@ -34,6 +34,10 @@ flowchart TD
     U --> V[Read features, emit actions]
     V --> V2[Write one JSON line per decision]
 
+    D --> |eval| Y[Require a checkpoint and a reward script]
+    Y --> Z[Score policy and baseline on the same rows]
+    Z --> Z2[Report the difference]
+
     D --> |export| W[Require a non-empty checkpoint]
     W --> X[Copy the file verbatim]
 ```
@@ -70,6 +74,19 @@ flowchart TD
    row leaves a gap rather than shifting every number after it.
 5. The loop sleeps `interval_secs` between samples, which suits polling a live
    provider but is slow over a file.
+
+## Evaluation path
+
+1. The checkpoint must exist and be non-empty, and a reward script is
+   **required** — without one every reward is `0.0` and the report would be
+   zeros presented as an answer.
+2. The node runs in inference mode over the held-out dataset, never sleeping
+   between samples: there is nothing to wait for in a batch pass over a file.
+3. For each row the reward script scores the policy's action, and — when
+   `--baseline` is given — the baseline's action on the **same row**. Scoring
+   them in separate passes would compare two different samples of the data.
+4. The report gives mean reward, success rate and a per-action breakdown for
+   each policy, plus the difference between them.
 
 ## Export path
 

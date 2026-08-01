@@ -37,6 +37,8 @@ flowchart TD
     H --> I[Report rows read and skipped]
     C --> |infer| J[Require a non-empty checkpoint]
     J --> K[Emit an action per sample]
+    C --> |eval| M[Score policy and baseline on the same rows]
+    M --> N[Report mean reward, per-action, and the difference]
     C --> |export| L[Copy the checkpoint verbatim]
 ```
 
@@ -47,6 +49,8 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
 - `train` subcommand for starting model training
 - `infer` subcommand for running inference against a trained model, emitting one
   JSON line per decision to stdout or to `--output PATH`
+- `eval` subcommand for scoring a checkpoint against held-out data and comparing
+  it with the heuristic you run today — see [docs/eval.md](docs/eval.md)
 - `export` subcommand for exporting trained models
 - CPU or GPU compute via `--backend [cpu|gpu]` (CPU default; GPU via wgpu, no CUDA needed)
 - Python reward factory and Python data provider integration, each backed by a
@@ -146,6 +150,18 @@ cargo run -- infer --dataset ./your-data.csv --model-name my-model.json
 Add `--with-features` to include the input that produced each decision, or
 `--output actions.jsonl` to write them to a file instead of stdout. Logs go to
 stderr, so the records pipe cleanly into `jq` or a downstream service.
+
+Check whether the model is worth shipping, against the rule you run today:
+
+```bash
+cargo run -- eval --dataset ./holdout.csv --model-name my-model.json \
+  --reward-script ./scripts/reward_script.py --baseline static:1
+```
+
+```text
+Difference: +0.2134 mean reward, +25.2pp success rate
+The policy beats the baseline.
+```
 
 Export a trained model:
 

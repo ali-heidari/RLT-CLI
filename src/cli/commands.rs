@@ -6,8 +6,58 @@ pub enum Commands {
     Train(TrainArgs),
     /// Perform inference to get actions from a trained model
     Infer(InferArgs),
+    /// Score a checkpoint against a held-out dataset, optionally versus a baseline
+    Eval(EvalArgs),
     /// Export a trained model to a supported format
     Export(ExportArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct EvalArgs {
+    /// Path to the held-out dataset to score against
+    #[arg(long, value_name = "PATH")]
+    pub dataset: Option<String>,
+
+    /// Name of the model checkpoint to evaluate
+    #[arg(long, value_name = "NAME")]
+    pub model_name: Option<String>,
+
+    /// Python reward script defining what "good" means; required
+    #[arg(long, value_name = "PATH")]
+    pub reward_script: Option<String>,
+
+    /// Policy to compare against: static:N, round-robin, random, or a .py script
+    #[arg(long, value_name = "SPEC")]
+    pub baseline: Option<String>,
+
+    /// Compute backend to run on (overrides the config file; defaults to cpu)
+    #[arg(long, value_enum)]
+    pub backend: Option<Backend>,
+
+    /// Skip the first CSV row instead of parsing it as data [default: false]
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
+    pub has_header: Option<bool>,
+
+    /// Field separator for CSV datasets [default: ,]
+    #[arg(long, value_name = "CHAR")]
+    pub delimiter: Option<char>,
+
+    /// Seconds to wait for a Python script to answer; 0 waits forever [default: 30]
+    #[arg(long, value_name = "SECS")]
+    pub script_timeout: Option<u64>,
+
+    /// How to present the report
+    #[arg(long, value_enum, default_value_t = ReportFormat::Text)]
+    pub format: ReportFormat,
+}
+
+/// How `eval` presents its results.
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum ReportFormat {
+    /// A human-readable report
+    Text,
+    /// A single JSON object, for CI and regression checks
+    Json,
 }
 
 #[derive(clap::Args, Debug)]

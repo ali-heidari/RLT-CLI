@@ -8,6 +8,7 @@ This folder contains human-readable documentation for the RLT-CLI project.
 - [Data providers](data_providers.md)
 - [CLI workflow](cli_workflow.md)
 - [Reward factory](reward_factory.md)
+- [Evaluation](eval.md)
 - [Troubleshooting](troubleshooting.md)
 - [Roadmap](roadmap.md)
 - [Found issues (upstream library)](found-issues.md)

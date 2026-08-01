@@ -1,13 +1,15 @@
 mod action_writer;
 mod cli;
+mod eval;
 mod providers;
 mod reward_factory;
 mod stop_signal;
 
 use action_writer::{ActionWriter, STDOUT_DESTINATION};
 use clap::Parser;
-use cli::commands::{ExportArgs, InferArgs, TrainArgs};
+use cli::commands::{EvalArgs, ExportArgs, InferArgs, ReportFormat, TrainArgs};
 use cli::{Cli, Commands};
+use eval::{Baseline, PolicyStats, Report};
 use providers::csv_dataset::{open_csv_dataset, CsvOptions};
 use providers::feature_source::{FeatureSource, Row};
 use providers::python_script::open_python_script;
@@ -859,6 +861,253 @@ async fn run_infer(
     Ok(())
 }
 
+/// Resolve evaluation settings with precedence: flag, then config file, then default.
+///
+/// `interval_secs` is forced to 0: evaluation is a batch pass over a held-out
+/// file, so there is never anything to wait for between samples.
+fn resolve_eval(file: &FileConfig, args: &EvalArgs) -> Resolved {
+    let (model_name, model_name_source) =
+        resolve_opt(args.model_name.clone(), file.model_name.clone());
+    let (backend, backend_source) = resolve(
+        args.backend.map(Into::into),
+        file.backend,
+        aixker_rlt::ComputeBackend::default(),
+    );
+    let (dataset, dataset_source) = resolve_opt(args.dataset.clone(), file.dataset.clone());
+    let (reward_script, reward_script_source) =
+        resolve_opt(args.reward_script.clone(), file.reward_script.clone());
+    let (csv_has_header, csv_delimiter, csv_provenance) =
+        resolve_csv(args.has_header, args.delimiter, file);
+    let (script_timeout, script_timeout_shown, script_timeout_source) =
+        resolve_script_timeout(args.script_timeout, file.script_timeout_secs);
+
+    let mut provenance = vec![
+        ("dataset", show(&dataset, "<not set>"), dataset_source),
+        (
+            "model name",
+            show(&model_name, "<not set>"),
+            model_name_source,
+        ),
+        (
+            "reward script",
+            show(&reward_script, "<not set>"),
+            reward_script_source,
+        ),
+        (
+            "baseline",
+            show(&args.baseline, "<none>"),
+            if args.baseline.is_some() {
+                Source::Flag
+            } else {
+                Source::Default
+            },
+        ),
+        (
+            "backend",
+            format!("{:?}", backend).to_lowercase(),
+            backend_source,
+        ),
+    ];
+
+    if is_python_dataset(&dataset) {
+        provenance.push((
+            "script timeout",
+            script_timeout_shown,
+            script_timeout_source,
+        ));
+    } else {
+        provenance.extend(csv_provenance);
+    }
+
+    Resolved {
+        config: aixker_rlt::configurations::Configurations {
+            interval_secs: 0,
+            batch_size: file.batch_size.unwrap_or(DEFAULT_BATCH_SIZE),
+            total_batches: file
+                .total_batches
+                .unwrap_or(DEFAULT_EPOCHS as usize * BATCHES_PER_EPOCH),
+            input_number: file.input_number.unwrap_or(DEFAULT_INPUT_NUMBER),
+            output_number: file.output_number.unwrap_or(DEFAULT_OUTPUT_NUMBER),
+            hidden_layers: file.hidden_layers.unwrap_or(DEFAULT_HIDDEN_LAYERS),
+            reply_capacity: file.reply_capacity.unwrap_or(DEFAULT_REPLY_CAPACITY),
+            model_name: model_name.unwrap_or_default(),
+            log_interval: file.log_interval.unwrap_or(DEFAULT_LOG_INTERVAL),
+            mode: aixker_rlt::RunningMode::Infer,
+            backend,
+        },
+        dataset,
+        reward_script,
+        csv_has_header,
+        csv_delimiter,
+        script_timeout,
+        provenance,
+    }
+}
+
+/// Score a checkpoint against a held-out dataset.
+async fn run_eval(
+    file_config: &FileConfig,
+    config_file: Option<&str>,
+    out: Output,
+    args: EvalArgs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let resolved = resolve_eval(file_config, &args);
+    out.settings(
+        "Evaluating with the following settings:",
+        &resolved.provenance,
+        config_file,
+    );
+
+    let config = resolved.config;
+    if config.model_name.is_empty() {
+        return Err("model_name must be set in the config file or via --model-name".into());
+    }
+
+    let checkpoint = checkpoint_path(&config.model_name);
+    ensure_checkpoint(
+        &checkpoint,
+        "Train a model first, or point --model-name at an existing checkpoint.",
+    )?;
+
+    let dataset_path = resolved
+        .dataset
+        .ok_or("dataset must be set in the config file or via --dataset")?;
+    if !Path::new(&dataset_path).is_file() {
+        return Err(format!("dataset not found: {}", dataset_path).into());
+    }
+
+    // Without a reward there is no notion of "good", so the whole command would
+    // report zeros and look like a working answer.
+    let reward_path = resolved.reward_script.ok_or(
+        "eval needs a reward script to score against: pass --reward-script, \
+         or set reward_script in the config file",
+    )?;
+    if !Path::new(&reward_path).is_file() {
+        return Err(format!("reward script not found or not a file: {}", reward_path).into());
+    }
+
+    let stop = StopSignal::new();
+    let rewards = RewardFactory::new(
+        Some(Path::new(&reward_path)),
+        stop.clone(),
+        resolved.script_timeout,
+    )?;
+
+    let baseline = match &args.baseline {
+        Some(spec) => Some(Baseline::parse(
+            spec,
+            config.output_number,
+            resolved.script_timeout,
+        )?),
+        None => None,
+    };
+
+    // Taken before the baseline moves into the scoring closure.
+    let baseline_label = baseline
+        .as_ref()
+        .map(|baseline| baseline.label().to_string());
+
+    let policy_stats = Arc::new(Mutex::new(PolicyStats::default()));
+    let baseline_stats = Arc::new(Mutex::new(PolicyStats::default()));
+
+    let config = Arc::new(config);
+    let input_number = config.input_number;
+
+    // `+ Send` matters: without it the boxed iterator makes the shared
+    // `FeatureSource` neither Send nor Sync, which the concrete provider types
+    // in `run_train` and `run_infer` are.
+    let provider: Box<dyn Iterator<Item = Row> + Send> = if is_python_path(&dataset_path) {
+        Box::new(open_python_script(&dataset_path, resolved.script_timeout)?)
+    } else {
+        Box::new(open_csv_dataset(
+            &dataset_path,
+            CsvOptions {
+                has_header: resolved.csv_has_header,
+                delimiter: delimiter_byte(resolved.csv_delimiter)?,
+            },
+        )?)
+    };
+
+    let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
+    let width = source.validate_first()?;
+    log::info!("first row loaded with {} value(s)", width);
+
+    let source = Arc::new(Mutex::new(source));
+    let node_source = source.clone();
+
+    let scoring_policy = policy_stats.clone();
+    let scoring_baseline = baseline_stats.clone();
+    let scoring_stop = stop.clone();
+
+    aixker_rlt::initialize(config.clone());
+    aixker_rlt::node::Node::start(
+        move |_lowest_state| node_source.lock().unwrap().next_features(),
+        move |features: &Vec<f32>, action: u32, _counter: u32| {
+            // Both policies are scored on this same row. Evaluating them in
+            // separate passes would compare two different samples and call the
+            // difference a result.
+            let (reward, success) = rewards.evaluate(features, action, 0.0);
+            scoring_policy
+                .lock()
+                .unwrap()
+                .record(action, reward, success);
+
+            if let Some(baseline) = &baseline {
+                match baseline.action(features) {
+                    Ok(baseline_action) => {
+                        let (reward, success) = rewards.evaluate(features, baseline_action, 0.0);
+                        scoring_baseline
+                            .lock()
+                            .unwrap()
+                            .record(baseline_action, reward, success);
+                    }
+                    Err(err) => scoring_stop.stop(format!("baseline failed: {}", err)),
+                }
+            }
+
+            (reward, success)
+        },
+        aixker_rlt::RunningMode::Infer,
+        &config.model_name,
+    )
+    .await;
+
+    report_source(&source)?;
+
+    let policy = Arc::try_unwrap(policy_stats)
+        .map_err(|_| "the evaluation outlived its statistics")?
+        .into_inner()?;
+    let baseline_totals = Arc::try_unwrap(baseline_stats)
+        .map_err(|_| "the evaluation outlived its statistics")?
+        .into_inner()?;
+
+    if policy.samples() == 0 {
+        return Err(format!("no rows were evaluated from {}", dataset_path).into());
+    }
+
+    let report = Report::new(
+        dataset_path,
+        config.model_name.clone(),
+        policy,
+        baseline_label.clone(),
+        baseline_label.as_ref().map(|_| baseline_totals),
+    );
+
+    log::info!("scored {} sample(s)", report.samples());
+    // Worth a warning of its own: someone reading CI logs rather than the
+    // report should still see that the heuristic won.
+    if report.policy_wins() == Some(false) {
+        log::warn!("the baseline scored better than the policy");
+    }
+
+    match args.format {
+        ReportFormat::Text => out.line(format!("\n{}", report)),
+        ReportFormat::Json => out.line(report.to_json()?),
+    }
+
+    Ok(())
+}
+
 /// Copy a trained checkpoint to an output path.
 ///
 /// `--format json` performs no conversion: checkpoints are already JSON and the
@@ -995,6 +1244,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Train(args) => run_train(&file_config, config_file.as_deref(), out, args).await?,
         Commands::Export(args) => run_export(&file_config, out, args)?,
         Commands::Infer(args) => run_infer(&file_config, config_file.as_deref(), out, args).await?,
+        Commands::Eval(args) => run_eval(&file_config, config_file.as_deref(), out, args).await?,
     }
 
     Ok(())

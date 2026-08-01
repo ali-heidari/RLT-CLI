@@ -199,6 +199,25 @@ Training never sleeps: the library only polls in inference mode, so
 The checkpoint must exist and be non-empty; otherwise the command fails rather
 than running an untrained model.
 
+### `eval`
+
+Scores a checkpoint against a held-out dataset, optionally next to a baseline
+policy. Full details in [eval.md](eval.md).
+
+- `--dataset PATH` — the held-out data. Required.
+- `--model-name NAME` — checkpoint to score. Required.
+- `--reward-script PATH` — **required.** Without it every reward is `0.0` and
+  the report would be zeros presented as an answer.
+- `--baseline SPEC` — `static:N`, `round-robin`, `random`, or a `.py` heuristic.
+  Optional; without it only the policy's own numbers are reported.
+- `--format [text|json]` — human-readable report, or one JSON object for CI.
+  Default: `text`.
+- `--backend`, `--has-header`, `--delimiter`, `--script-timeout` — as for
+  `train`.
+
+Evaluation never sleeps between samples: it is a batch pass over a held-out
+file, so `interval_secs` does not apply.
+
 ### `export`
 
 - `--checkpoint PATH`

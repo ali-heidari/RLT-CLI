@@ -518,6 +518,188 @@ fn a_header_row_needs_the_flag() {
         .success();
 }
 
+/// A reward script that pays for action 1 and nothing else, so a static:1
+/// baseline is unbeatable and any other baseline is beatable. Deterministic, so
+/// the comparison in these tests is exact.
+const FIXED_REWARD: &str = "import json, sys\n\
+     for line in sys.stdin:\n\
+     \x20   request = json.loads(line)\n\
+     \x20   good = request['action'] == 1\n\
+     \x20   print(json.dumps({\"reward\": 1.0 if good else 0.0, \"success\": good}), flush=True)\n";
+
+/// A workspace with a trained checkpoint, a held-out set, and a reward script.
+fn eval_workspace() -> TempDir {
+    let dir = trained_workspace();
+    fs::write(dir.path().join("reward.py"), FIXED_REWARD).unwrap();
+    dir
+}
+
+#[test]
+fn eval_scores_a_checkpoint_against_a_baseline() {
+    let dir = eval_workspace();
+
+    let stdout = rlt(&dir)
+        .args([
+            "eval",
+            "--dataset",
+            "./infer.csv",
+            "--reward-script",
+            "./reward.py",
+            "--baseline",
+            "static:1",
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+
+    assert!(stdout.contains("Evaluated 3 sample(s)"), "{}", stdout);
+    assert!(stdout.contains("Policy:"), "{}", stdout);
+    assert!(stdout.contains("Baseline: static:1"), "{}", stdout);
+    assert!(stdout.contains("Difference:"), "{}", stdout);
+    // static:1 always earns the reward, so it cannot be beaten here.
+    assert!(
+        stdout.contains("The baseline beats the policy.") || stdout.contains("are level."),
+        "{}",
+        stdout
+    );
+}
+
+#[test]
+fn eval_reports_the_policy_alone_without_a_baseline() {
+    let dir = eval_workspace();
+
+    rlt(&dir)
+        .args([
+            "eval",
+            "--dataset",
+            "./infer.csv",
+            "--reward-script",
+            "./reward.py",
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mean reward"))
+        .stdout(predicate::str::contains("Difference:").not());
+}
+
+#[test]
+fn eval_emits_a_json_summary() {
+    let dir = eval_workspace();
+
+    let stdout = rlt(&dir)
+        .args([
+            "eval",
+            "--dataset",
+            "./infer.csv",
+            "--reward-script",
+            "./reward.py",
+            "--baseline",
+            "round-robin",
+            "--format",
+            "json",
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+
+    let json = stdout
+        .split_once('{')
+        .map(|(_, rest)| format!("{{{}", rest))
+        .expect("no JSON object in the output");
+    assert!(json.contains("\"reward_gain\""), "{}", json);
+    assert!(json.contains("\"mean_reward\""), "{}", json);
+    assert!(json.contains("\"baseline\""), "{}", json);
+}
+
+#[test]
+fn eval_without_a_reward_script_is_refused() {
+    // Every reward would be 0.0, so the report would be zeros presented as an
+    // answer.
+    let dir = eval_workspace();
+
+    rlt(&dir)
+        .args(["eval", "--dataset", "./infer.csv"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("needs a reward script"));
+}
+
+#[test]
+fn eval_rejects_a_baseline_outside_the_action_space() {
+    let dir = eval_workspace();
+
+    rlt(&dir)
+        .args([
+            "eval",
+            "--dataset",
+            "./infer.csv",
+            "--reward-script",
+            "./reward.py",
+            "--baseline",
+            "static:99",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("outside the model's action space"));
+}
+
+#[test]
+fn eval_accepts_a_heuristic_script_as_the_baseline() {
+    let dir = eval_workspace();
+    fs::write(
+        dir.path().join("heuristic.py"),
+        "import json, sys\n\
+         for line in sys.stdin:\n\
+         \x20   request = json.loads(line)\n\
+         \x20   # The rule a team might already run: high first feature -> act.\n\
+         \x20   print(json.dumps({\"action\": 1 if request['features'][0] > 0.15 else 0}), flush=True)\n",
+    )
+    .unwrap();
+
+    rlt(&dir)
+        .args([
+            "eval",
+            "--dataset",
+            "./infer.csv",
+            "--reward-script",
+            "./reward.py",
+            "--baseline",
+            "./heuristic.py",
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Baseline: ./heuristic.py"));
+}
+
+#[test]
+fn eval_without_a_checkpoint_fails_instead_of_scoring_random_weights() {
+    let dir = eval_workspace();
+
+    rlt(&dir)
+        .args([
+            "eval",
+            "--dataset",
+            "./infer.csv",
+            "--reward-script",
+            "./reward.py",
+            "--model-name",
+            "ghost.json",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("checkpoint not found"));
+}
+
 #[test]
 fn export_accepts_a_model_name() {
     // train and infer both take --model-name; export used to accept only
