@@ -633,6 +633,7 @@ async fn run_train(
     // The reward factory ends the run through this; the data source is what
     // the library actually listens to.
     let stop = StopSignal::new();
+    stop_on_interrupt(stop.clone());
     let reward_factory = RewardFactory::new(
         reward_script.as_deref(),
         stop.clone(),
@@ -711,6 +712,36 @@ async fn run_train(
 
     log::info!("training finished");
     Ok(())
+}
+
+/// Turn Ctrl-C into a clean end-of-data rather than a killed process.
+///
+/// The library ends its loop when the input closure returns an empty vector, so
+/// interrupting is a matter of telling the data source to stop. The run then
+/// winds down exactly as if the dataset had ended: totals are reported, and the
+/// last completed batch's checkpoint survives instead of the process being
+/// killed part-way through writing one.
+///
+/// Uses `tokio::signal` rather than a signal-handling crate — tokio is already
+/// a dependency, and this needs no extra machinery.
+fn stop_on_interrupt(stop: Arc<StopSignal>) {
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_err() {
+            return;
+        }
+        stop.stop_gracefully(
+            "interrupted: finishing the current step and saving what is done".to_string(),
+        );
+
+        // Installing a handler means the second Ctrl-C would be swallowed too,
+        // leaving no way out of a wind-down that is itself stuck — waiting on a
+        // script mid-request, say. So the second one means "now", with the
+        // conventional 128 + SIGINT status.
+        if tokio::signal::ctrl_c().await.is_ok() {
+            log::warn!("interrupted again; exiting without saving");
+            std::process::exit(130);
+        }
+    });
 }
 
 /// Report how the data source was consumed, surfacing the error that stopped
@@ -808,11 +839,16 @@ async fn run_infer(
 
     let input_number = config.input_number;
 
+    // Ctrl-C part-way through a long file should still leave the decisions
+    // computed so far written out.
+    let stop = StopSignal::new();
+    stop_on_interrupt(stop.clone());
+
     if is_python_script {
         log::info!("using Python script data provider from {}", dataset_path);
         let provider = open_python_script(&dataset_path, resolved.script_timeout)?;
 
-        let mut source = FeatureSource::new(provider, input_number);
+        let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
         let width = source.validate_first()?;
         log::info!("first sample loaded with {} feature(s)", width);
 
@@ -836,7 +872,7 @@ async fn run_infer(
         };
         let provider = open_csv_dataset(&dataset_path, options)?;
 
-        let mut source = FeatureSource::new(provider, input_number);
+        let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
         let width = source.validate_first()?;
         log::info!("first CSV row loaded with {} field(s)", width);
 
@@ -1008,6 +1044,7 @@ async fn run_eval(
     }
 
     let stop = StopSignal::new();
+    stop_on_interrupt(stop.clone());
     let rewards = RewardFactory::new(
         Some(Path::new(&reward_path)),
         stop.clone(),

@@ -100,14 +100,23 @@ where
         }
 
         // Something outside the data source asked the run to end — a reward
-        // script that stopped answering, for instance. Reporting it as fatal
-        // here is what turns it into a non-zero exit with an explanation.
+        // script that stopped answering, or Ctrl-C.
         if let Some(stop) = &self.stop {
             if stop.is_stopped() {
-                self.fatal = Some(
-                    stop.reason()
-                        .unwrap_or_else(|| "the run was stopped".to_string()),
-                );
+                let reason = stop
+                    .reason()
+                    .unwrap_or_else(|| "the run was stopped".to_string());
+
+                if stop.is_fatal() {
+                    // Recorded as fatal, which is what turns it into a non-zero
+                    // exit with an explanation.
+                    self.fatal = Some(reason);
+                } else {
+                    // Treated exactly like an exhausted data source, so the
+                    // library winds down and the last checkpoint survives.
+                    log::info!("{}; stopping after {} row(s)", reason, self.rows_read);
+                    self.exhausted = true;
+                }
                 return Vec::new();
             }
         }
@@ -309,6 +318,22 @@ mod tests {
 
         let message = source.finish().unwrap_err().to_string();
         assert!(message.contains("failed 10 times in a row"), "{}", message);
+    }
+
+    #[test]
+    fn a_graceful_stop_ends_the_run_without_failing_it() {
+        // Ctrl-C: the rows already read are real work and the run should report
+        // them, not throw an error over them.
+        let signal = StopSignal::new();
+        let mut source =
+            source(vec![ok(&[1.0, 2.0]), ok(&[3.0, 4.0])], 2).with_stop_signal(signal.clone());
+
+        assert_eq!(source.next_features(), vec![1.0, 2.0]);
+        signal.stop_gracefully("interrupted".to_string());
+        assert!(source.next_features().is_empty());
+
+        let stats = source.finish().expect("a graceful stop is not a failure");
+        assert_eq!(stats.rows_read, 1);
     }
 
     #[test]

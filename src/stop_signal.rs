@@ -12,12 +12,15 @@ use std::sync::{Arc, Mutex};
 
 /// A shared "stop the run" flag.
 ///
-/// A stop is **fatal**: the reason becomes the run's error and the process
-/// exits non-zero. Ctrl-C will want a graceful variant that lets the run wind
-/// down and keep its checkpoint; that belongs here too when it lands.
+/// Stops come in two kinds. A **fatal** stop — a reward script that died —
+/// becomes the run's error and exits non-zero. A **graceful** stop — Ctrl-C —
+/// ends the run as though the data had simply run out, so the last completed
+/// batch's checkpoint survives and the usual totals are reported.
 #[derive(Default)]
 pub struct StopSignal {
     stopped: AtomicBool,
+    /// Whether the stop should be reported as a failure.
+    fatal: AtomicBool,
     /// The first reason given. A failure that repeats per step — a worker whose
     /// pipe is closed, say — would otherwise overwrite itself with noise.
     reason: Mutex<Option<String>>,
@@ -28,15 +31,35 @@ impl StopSignal {
         Arc::new(Self::default())
     }
 
-    /// Ask the run to stop, keeping the first reason given.
+    /// Ask the run to stop and report a failure, keeping the first reason.
     pub fn stop(&self, reason: String) {
         if let Ok(mut held) = self.reason.lock() {
             if held.is_none() {
                 log::error!("stopping the run: {}", reason);
                 *held = Some(reason);
+                self.fatal.store(true, Ordering::SeqCst);
             }
         }
         self.stopped.store(true, Ordering::SeqCst);
+    }
+
+    /// Ask the run to wind down as though the data source had ended.
+    ///
+    /// Used for Ctrl-C: the work already done is worth keeping, so this is not
+    /// a failure and the process still exits zero.
+    pub fn stop_gracefully(&self, reason: String) {
+        if let Ok(mut held) = self.reason.lock() {
+            if held.is_none() {
+                log::warn!("{}", reason);
+                *held = Some(reason);
+            }
+        }
+        self.stopped.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether the stop should be reported as a failure.
+    pub fn is_fatal(&self) -> bool {
+        self.fatal.load(Ordering::SeqCst)
     }
 
     /// Whether the run has been asked to stop.
@@ -63,6 +86,27 @@ mod tests {
 
         assert!(!signal.is_stopped());
         assert!(signal.reason().is_none());
+    }
+
+    #[test]
+    fn a_graceful_stop_is_not_a_failure() {
+        // Ctrl-C should end the run the way an exhausted dataset does, keeping
+        // the work already done rather than reporting it as broken.
+        let signal = StopSignal::new();
+        signal.stop_gracefully("interrupted".to_string());
+
+        assert!(signal.is_stopped());
+        assert!(!signal.is_fatal());
+        assert_eq!(signal.reason().unwrap(), "interrupted");
+    }
+
+    #[test]
+    fn a_fatal_stop_is_marked_as_one() {
+        let signal = StopSignal::new();
+        signal.stop("the reward script died".to_string());
+
+        assert!(signal.is_stopped());
+        assert!(signal.is_fatal());
     }
 
     #[test]

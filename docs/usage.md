@@ -63,6 +63,26 @@ Export a trained checkpoint:
 RLT-CLI export --output ./exported/model.json
 ```
 
+## Interrupting a run
+
+Ctrl-C ends `train`, `infer` and `eval` **cleanly** rather than killing them.
+The run stops asking for data, winds down the way it would at the end of the
+dataset, reports its totals, and exits `0`:
+
+```text
+WARN  interrupted: finishing the current step and saving what is done
+INFO  read 10489 row(s) from the data source, skipped 0
+INFO  checkpoint written to ./models/my-model.json.my-model.json (3150 bytes)
+```
+
+So the last completed batch's checkpoint survives, and `infer --output` keeps
+the decisions written so far, instead of the process dying part-way through a
+write.
+
+A **second** Ctrl-C exits immediately with status `130`, without saving. The
+wind-down can itself be slow — waiting on a Python script mid-request, for
+instance — and handling the first signal would otherwise leave no way out.
+
 ## Where checkpoints live
 
 Checkpoints are written under `./models/` relative to the working directory.
