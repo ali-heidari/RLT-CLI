@@ -110,8 +110,15 @@ one per policy.
 
 ```bash
 rlt eval --dataset ./holdout.csv --model-name my-model.json \
-  --reward-script ./reward.py --baseline static:1 --format json
+  --reward-script ./reward.py --baseline static:1 \
+  --format json --output report.json
 ```
+
+**Use `--output`, not a stdout redirect.** The report goes to stdout by default
+and the settings block goes to stderr, so `> report.json` is *nearly* right —
+but the library prints `EMPTY INPUT` straight to stdout when a data source ends
+([found-issues.md](found-issues.md) issue 5), past every filter this CLI
+controls. `--output` writes the report and nothing else.
 
 ```json
 {

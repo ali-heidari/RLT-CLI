@@ -80,6 +80,10 @@ pub struct EvalArgs {
     /// How to present the report
     #[arg(long, value_enum, default_value_t = ReportFormat::Text)]
     pub format: ReportFormat,
+
+    /// Write the report here instead of stdout; "-" is stdout
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<String>,
 }
 
 /// How `eval` presents its results.

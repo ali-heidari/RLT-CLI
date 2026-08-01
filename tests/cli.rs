@@ -101,7 +101,7 @@ fn init_scaffolds_a_project_that_trains_and_evaluates() {
         .arg("init")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Config.toml"));
+        .stderr(predicate::str::contains("Config.toml"));
 
     for scaffolded in [
         "Config.toml",
@@ -197,7 +197,7 @@ fn train_then_infer_then_export() {
         .args(["export", "--output", "./exported/model.json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Model exported to"));
+        .stderr(predicate::str::contains("Model exported to"));
 
     let exported = dir.path().join("exported/model.json");
     assert!(exported.is_file(), "export produced no file");
@@ -225,10 +225,24 @@ fn infer_emits_one_action_per_sample() {
         .clone();
     let stdout = String::from_utf8(stdout).unwrap();
 
+    // Every line, not just the ones that look like records: stdout carries the
+    // command's result and nothing else, so `rlt infer | jq` works. The banner
+    // and settings block go to stderr — filtering for `{` here is exactly what
+    // hid the fact that they used to share this stream.
+    //
+    // `EMPTY INPUT` is excluded by name because the library prints it straight
+    // to stdout when a data source ends, past every filter this CLI configures
+    // (docs/found-issues.md issue 5). The exclusion is deliberately narrow:
+    // anything else that is not a record still fails.
     let records: Vec<&str> = stdout
         .lines()
-        .filter(|line| line.starts_with('{'))
+        .filter(|line| !line.is_empty() && *line != "EMPTY INPUT")
         .collect();
+    assert!(
+        records.iter().all(|line| line.starts_with('{')),
+        "stdout must be records only:\n{}",
+        stdout
+    );
 
     assert_eq!(records.len(), 3, "expected one record per row:\n{}", stdout);
     assert!(records[0].contains("\"row\":1"), "{}", records[0]);
@@ -259,7 +273,7 @@ fn inference_over_a_file_does_not_poll() {
         .timeout(std::time::Duration::from_secs(60))
         .assert()
         .success()
-        .stdout(predicate::str::contains("interval: 0s (file dataset)"));
+        .stderr(predicate::str::contains("interval: 0s (file dataset)"));
 }
 
 #[test]
@@ -402,7 +416,7 @@ fn it_runs_without_a_config_file() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("No config file found"));
+        .stderr(predicate::str::contains("No config file found"));
 }
 
 #[test]
@@ -461,7 +475,7 @@ fn config_file_values_reach_the_run() {
         .args(["train", "--dataset", "./data.csv", "--dry-run"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("batch size: 8 (Config.toml)"));
+        .stderr(predicate::str::contains("batch size: 8 (Config.toml)"));
 }
 
 #[test]
@@ -479,7 +493,7 @@ fn a_flag_overrides_the_config_file() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("batch size: 99 (flag)"));
+        .stderr(predicate::str::contains("batch size: 99 (flag)"));
 }
 
 #[test]
@@ -663,7 +677,7 @@ fn eval_reports_the_policy_alone_without_a_baseline() {
 fn eval_emits_a_json_summary() {
     let dir = eval_workspace();
 
-    let stdout = rlt(&dir)
+    rlt(&dir)
         .args([
             "eval",
             "--dataset",
@@ -674,22 +688,25 @@ fn eval_emits_a_json_summary() {
             "round-robin",
             "--format",
             "json",
+            "--output",
+            "./report.json",
         ])
         .timeout(std::time::Duration::from_secs(60))
         .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let stdout = String::from_utf8(stdout).unwrap();
+        .success();
 
-    let json = stdout
-        .split_once('{')
-        .map(|(_, rest)| format!("{{{}", rest))
-        .expect("no JSON object in the output");
-    assert!(json.contains("\"reward_gain\""), "{}", json);
-    assert!(json.contains("\"mean_reward\""), "{}", json);
-    assert!(json.contains("\"baseline\""), "{}", json);
+    // Parsed, not merely searched: --format json exists so a CI step can read
+    // the result back. Written to a file rather than redirected from stdout
+    // because the library prints EMPTY INPUT straight to stdout when a data
+    // source ends (docs/found-issues.md issue 5), which would leave the
+    // redirect holding something that is not JSON through no fault of ours.
+    let written = fs::read_to_string(dir.path().join("report.json")).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&written)
+        .unwrap_or_else(|err| panic!("report is not JSON ({}):\n{}", err, written));
+
+    assert!(parsed.get("reward_gain").is_some(), "{}", written);
+    assert!(parsed["policy"]["mean_reward"].is_number(), "{}", written);
+    assert!(parsed["baseline"]["label"].is_string(), "{}", written);
 }
 
 #[test]

@@ -6,6 +6,8 @@ command.
 ## Docs
 
 - [Getting started (`rlt init`)](init.md)
+- [Tutorial: from logs to a decision you can check](tutorial.md)
+- [Recipes](recipes.md)
 - [Usage](usage.md)
 - [Data providers](data_providers.md)
 - [CLI workflow](cli_workflow.md)

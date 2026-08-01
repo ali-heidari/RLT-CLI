@@ -312,6 +312,10 @@ claims that nothing verified before this workflow existed.
 For detailed usage instructions, troubleshooting, and feature guides, see the [documentation index](docs/index.md):
 
 - [init.md](docs/init.md) — the quickstart in full
+- [tutorial.md](docs/tutorial.md) — one complete story: shape data, write a
+  reward, train, evaluate, export
+- [recipes.md](docs/recipes.md) — autoscaling, LB weighting, cache admission,
+  queue prioritisation, retry budgets
 - [usage.md](docs/usage.md) — every command and flag
 - [eval.md](docs/eval.md) — scoring a checkpoint against a baseline
 - [cli_workflow.md](docs/cli_workflow.md)

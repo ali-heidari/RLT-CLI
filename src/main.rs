@@ -591,10 +591,26 @@ impl Output {
         Self { silent }
     }
 
-    /// Print one line of command output.
+    /// Print the command's **result**, on stdout.
+    ///
+    /// Only what a caller would want to capture: the inference records, the
+    /// evaluation report, the checkpoint dump. Anything else sharing this
+    /// stream would land in `> results.json` along with it.
     fn line(&self, text: impl std::fmt::Display) {
         if !self.silent {
             println!("{}", text);
+        }
+    }
+
+    /// Print commentary, on stderr.
+    ///
+    /// The banner, the settings block, progress notes — useful to a person
+    /// watching, noise to `jq`. Keeping them off stdout is what makes
+    /// `rlt eval --format json > report.json` and `rlt infer | jq` work without
+    /// any flag to quieten things first.
+    fn note(&self, text: impl std::fmt::Display) {
+        if !self.silent {
+            eprintln!("{}", text);
         }
     }
 
@@ -608,9 +624,9 @@ impl Output {
         if self.silent {
             return;
         }
-        println!("{}", title);
+        eprintln!("{}", title);
         for (name, value, source) in provenance {
-            println!("  {}: {} ({})", name, value, source.label(config_file));
+            eprintln!("  {}: {} ({})", name, value, source.label(config_file));
         }
     }
 }
@@ -656,7 +672,7 @@ async fn run_train(
     // Everything the run needs has now been validated, which is the point of a
     // dry run: it must fail on a configuration that could not actually run.
     if args.dry_run {
-        out.line("Dry run enabled. No training will be performed.");
+        out.note("Dry run enabled. No training will be performed.");
         return Ok(());
     }
 
@@ -914,17 +930,17 @@ fn run_init(out: Output, args: InitArgs) -> Result<(), Box<dyn std::error::Error
     let dir = Path::new(&args.dir);
     let written = init::write(dir, args.force)?;
 
-    out.line(format!("Scaffolded {} file(s):", written.len()));
+    out.note(format!("Scaffolded {} file(s):", written.len()));
     for path in &written {
-        out.line(format!("  {}", path.display()));
+        out.note(format!("  {}", path.display()));
     }
 
-    out.line("");
-    out.line("Next:");
-    out.line("  rlt train");
-    out.line("  rlt eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py");
-    out.line("");
-    out.line("The reward script defines what \"good\" means; edit it for your problem.");
+    out.note("");
+    out.note("Next:");
+    out.note("  rlt train");
+    out.note("  rlt eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py");
+    out.note("");
+    out.note("The reward script defines what \"good\" means; edit it for your problem.");
 
     Ok(())
 }
@@ -1161,10 +1177,11 @@ async fn run_eval(
         log::warn!("the baseline scored better than the policy");
     }
 
-    match args.format {
-        ReportFormat::Text => out.line(format!("\n{}", report)),
-        ReportFormat::Json => out.line(report.to_json()?),
-    }
+    let text = match args.format {
+        ReportFormat::Text => format!("\n{}", report),
+        ReportFormat::Json => report.to_json()?,
+    };
+    write_report(args.output.as_deref(), out, &text)?;
 
     Ok(())
 }
@@ -1195,6 +1212,42 @@ fn resolve_checkpoint(
             Ok(checkpoint_path(name))
         }
     }
+}
+
+/// Deliver a command's report, to a file or to stdout.
+///
+/// A file is worth having for more than tidiness. The library prints
+/// `EMPTY INPUT` directly to stdout when a data source ends
+/// (`docs/found-issues.md` issue 5), bypassing every filter this CLI
+/// configures, so `--format json > report.json` yields a file that is not
+/// JSON. `--output` sidesteps a stream we do not fully control.
+fn write_report(
+    destination: Option<&str>,
+    out: Output,
+    text: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(path) = destination.filter(|path| *path != STDOUT_DESTINATION) else {
+        out.line(text);
+        return Ok(());
+    };
+
+    if let Some(parent) = Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "failed to create output directory '{}': {}",
+                    parent.display(),
+                    err
+                )
+            })?;
+        }
+    }
+
+    fs::write(path, format!("{}\n", text.trim_end()))
+        .map_err(|err| format!("failed to write the report to '{}': {}", path, err))?;
+    out.note(format!("Report written to {}", path));
+
+    Ok(())
 }
 
 /// Report what a checkpoint holds.
@@ -1255,10 +1308,10 @@ fn run_export(
         "no checkpoint to export",
     )?;
 
-    out.line("Exporting model with the following settings:");
-    out.line(format!("  checkpoint: {}", checkpoint.display()));
-    out.line(format!("  output: {}", args.output));
-    out.line(format!(
+    out.note("Exporting model with the following settings:");
+    out.note(format!("  checkpoint: {}", checkpoint.display()));
+    out.note(format!("  output: {}", args.output));
+    out.note(format!(
         "  format: {:?} (copied as-is, no conversion)",
         args.format
     ));
@@ -1291,7 +1344,7 @@ fn run_export(
         )
     })?;
 
-    out.line(format!("Model exported to {}", args.output));
+    out.note(format!("Model exported to {}", args.output));
     Ok(())
 }
 
@@ -1359,13 +1412,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         let loaded = load_file_config(cli.config.as_ref())?;
 
-        out.line(format!(
+        out.note(format!(
             "Aixker-RLT CLI invoked with log level: {:?}",
             log_level
         ));
         match &loaded.1 {
-            Some(path) => out.line(format!("Using config file: {}", path)),
-            None => out.line("No config file found; using built-in defaults."),
+            Some(path) => out.note(format!("Using config file: {}", path)),
+            None => out.note("No config file found; using built-in defaults."),
         }
 
         loaded

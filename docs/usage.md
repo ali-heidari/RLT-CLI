@@ -198,12 +198,18 @@ $ rlt infer --dataset ./infer.csv --model-name my-model.json --with-features
 `row` is the number of the row **in the data source**, so a row that was skipped
 as unparseable leaves a gap rather than shifting every number after it.
 
-Records go to stdout and logs go to stderr, so the stream is machine-readable
-without any flags:
+Records go to stdout; the banner, the settings block and every log line go to
+stderr. So the stream is machine-readable without any flags:
 
 ```bash
 rlt infer --dataset ./infer.csv --model-name my-model.json 2>/dev/null | jq -c
 ```
+
+One caveat: the library prints `EMPTY INPUT` directly to stdout when the data
+source ends, past every filter this CLI configures
+([found-issues.md](found-issues.md) issue 5). Until that is fixed upstream, use
+`--output actions.jsonl` when the output must parse cleanly, or drop the line
+with `grep -v '^EMPTY INPUT'`.
 
 `--silent` prints nothing, so it suppresses the records too — unless you also
 pass `--output PATH`, in which case the file is still written. A file you asked
@@ -248,6 +254,8 @@ policy. Full details in [eval.md](eval.md).
   Optional; without it only the policy's own numbers are reported.
 - `--format [text|json]` — human-readable report, or one JSON object for CI.
   Default: `text`.
+- `--output PATH` — write the report here instead of stdout. Prefer this to a
+  shell redirect for machine-readable output; see [eval.md](eval.md#machine-readable-output).
 - `--backend`, `--has-header`, `--delimiter`, `--script-timeout` — as for
   `train`.
 
