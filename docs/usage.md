@@ -236,8 +236,16 @@ All keys are optional. See [Config.sample.toml](../Config.sample.toml).
 `input_number` must match the number of values in each row of your data; a
 mismatch is reported before training starts.
 
-Unknown keys are ignored. `mode` in particular has no effect — the subcommand
-decides whether the run trains or infers.
+An unrecognised key is reported as a warning and otherwise ignored:
+
+```text
+WARN unknown key 'bacth_size' in Config.toml has no effect.
+```
+
+`mode` and `debug` are the exceptions: they are accepted silently because they
+appear in configs written for earlier versions. Neither does anything — the
+subcommand decides whether the run trains or infers, and `--log-level` controls
+logging.
 
 ## Tests
 

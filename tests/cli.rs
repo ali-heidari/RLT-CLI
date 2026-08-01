@@ -359,6 +359,28 @@ fn a_malformed_config_names_the_file() {
 }
 
 #[test]
+fn a_typod_config_key_warns_instead_of_being_ignored() {
+    // Regression: an unknown key configured nothing and said nothing, so a
+    // misspelling looked exactly like a setting that had been applied.
+    let dir = workspace(10);
+    let config = format!("{}bacth_size = 64\n", CONFIG);
+    fs::write(dir.path().join("typo.toml"), config).unwrap();
+
+    rlt(&dir)
+        .args([
+            "--config",
+            "./typo.toml",
+            "train",
+            "--dataset",
+            "./data.csv",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("unknown key 'bacth_size'"));
+}
+
+#[test]
 fn config_file_values_reach_the_run() {
     // Regression: clap defaults used to mask every value in the config file.
     let dir = workspace(10);

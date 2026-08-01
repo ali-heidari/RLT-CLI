@@ -68,6 +68,54 @@ struct FileConfig {
     script_timeout_secs: Option<u64>,
 }
 
+/// Every key [`FileConfig`] understands.
+///
+/// Kept in step with the struct by `every_config_field_is_in_the_known_key_set`,
+/// which fails to compile if a field is added without a matching entry here.
+const KNOWN_CONFIG_KEYS: [&str; 15] = [
+    "interval_secs",
+    "batch_size",
+    "total_batches",
+    "input_number",
+    "output_number",
+    "hidden_layers",
+    "reply_capacity",
+    "model_name",
+    "log_interval",
+    "backend",
+    "dataset",
+    "reward_script",
+    "has_header",
+    "delimiter",
+    "script_timeout_secs",
+];
+
+/// Keys ignored on purpose rather than warned about.
+///
+/// `mode` is decided by the subcommand and `debug` predates `--log-level`. Both
+/// appear in configs written for earlier versions, so warning about them would
+/// be noise rather than help.
+const IGNORED_CONFIG_KEYS: [&str; 2] = ["mode", "debug"];
+
+/// Keys in the config file that the CLI does not understand.
+///
+/// Returns them rather than logging so the rule can be asserted directly.
+fn unknown_config_keys(text: &str) -> Vec<String> {
+    let Ok(table) = toml::from_str::<toml::Table>(text) else {
+        // Not parseable at all; the typed parse reports the real problem.
+        return Vec::new();
+    };
+
+    table
+        .keys()
+        .filter(|key| {
+            let key = key.as_str();
+            !KNOWN_CONFIG_KEYS.contains(&key) && !IGNORED_CONFIG_KEYS.contains(&key)
+        })
+        .cloned()
+        .collect()
+}
+
 /// Where an effective value came from, reported by the settings block.
 #[derive(Copy, Clone, Debug, PartialEq)]
 enum Source {
@@ -265,6 +313,18 @@ fn load_file_config(
         .map_err(|err| format!("failed to read config file '{}': {}", path, err))?;
     let config = toml::from_str::<FileConfig>(&text)
         .map_err(|err| format!("failed to parse config file '{}': {}", path, err))?;
+
+    // A second parse of the same string, purely to audit the key names. Reading
+    // the values through `toml::Table` instead would lose the line and column
+    // that make a type error findable. A warning rather than an error: an
+    // unknown key is a mistake, not a reason to refuse to run.
+    for key in unknown_config_keys(&text) {
+        log::warn!(
+            "unknown key '{}' in {} has no effect. See docs/usage.md for the supported keys.",
+            key,
+            path
+        );
+    }
 
     Ok((config, Some(path)))
 }
@@ -951,6 +1011,48 @@ mod tests {
             delimiter: Some(';'),
             ..FileConfig::default()
         }
+    }
+
+    #[test]
+    fn a_typod_config_key_is_reported() {
+        // Regression: `bacth_size = 64` configured nothing and said nothing.
+        let unknown = unknown_config_keys("bacth_size = 64\nbatch_size = 32\n");
+        assert_eq!(unknown, vec!["bacth_size".to_string()]);
+    }
+
+    #[test]
+    fn mode_and_debug_are_ignored_on_purpose() {
+        assert!(unknown_config_keys("mode = \"Infer\"\ndebug = false\n").is_empty());
+    }
+
+    #[test]
+    fn every_config_field_is_in_the_known_key_set() {
+        // The pattern names every field, so adding one to FileConfig without a
+        // matching entry in KNOWN_CONFIG_KEYS stops compiling here — rather
+        // than warning users about a key that is perfectly valid.
+        let FileConfig {
+            interval_secs: _,
+            batch_size: _,
+            total_batches: _,
+            input_number: _,
+            output_number: _,
+            hidden_layers: _,
+            reply_capacity: _,
+            model_name: _,
+            log_interval: _,
+            backend: _,
+            dataset: _,
+            reward_script: _,
+            has_header: _,
+            delimiter: _,
+            script_timeout_secs: _,
+        } = FileConfig::default();
+
+        assert_eq!(
+            KNOWN_CONFIG_KEYS.len(),
+            15,
+            "a field was added to FileConfig; add its key to KNOWN_CONFIG_KEYS"
+        );
     }
 
     #[test]
