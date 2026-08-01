@@ -52,6 +52,12 @@ reply_capacity = 4096
 # --reward-script. Optional; without it every reward is 0.0.
 reward_script = "./scripts/reward_script.py"
 
+# Seconds to wait for a Python script — data provider or reward script — to
+# answer one request. Overridden by --script-timeout. A script that never
+# answers would otherwise hang the CLI with no output at all. Set to 0 to wait
+# forever. Default: 30
+script_timeout_secs = 30
+
 # --- Runtime ------------------------------------------------------------
 
 # Seconds slept between samples during inference; training ignores it.

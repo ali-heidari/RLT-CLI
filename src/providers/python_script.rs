@@ -8,6 +8,7 @@
 use crate::providers::python_worker::PythonWorker;
 use std::error::Error;
 use std::path::Path;
+use std::time::Duration;
 
 /// Request sent to ask for the next sample.
 ///
@@ -20,7 +21,7 @@ pub struct PythonScriptProvider {
 }
 
 impl PythonScriptProvider {
-    pub fn new(script_path: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn new(script_path: &str, timeout: Option<Duration>) -> Result<Self, Box<dyn Error>> {
         let path = Path::new(script_path);
         if !path.exists() {
             return Err(format!("Python script not found: {}", script_path).into());
@@ -30,7 +31,7 @@ impl PythonScriptProvider {
         }
 
         Ok(PythonScriptProvider {
-            worker: PythonWorker::spawn(script_path)?,
+            worker: PythonWorker::spawn(script_path, timeout)?,
         })
     }
 
@@ -78,8 +79,11 @@ impl Iterator for PythonScriptProvider {
     }
 }
 
-pub fn open_python_script(script_path: &str) -> Result<PythonScriptProvider, Box<dyn Error>> {
-    PythonScriptProvider::new(script_path)
+pub fn open_python_script(
+    script_path: &str,
+    timeout: Option<Duration>,
+) -> Result<PythonScriptProvider, Box<dyn Error>> {
+    PythonScriptProvider::new(script_path, timeout)
 }
 
 #[cfg(test)]

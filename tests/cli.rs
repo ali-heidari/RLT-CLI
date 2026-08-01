@@ -502,6 +502,28 @@ fn a_python_provider_that_dies_is_reported() {
 }
 
 #[test]
+fn a_hanging_python_script_times_out_instead_of_hanging_the_cli() {
+    // Regression: the CLI blocked in read_line forever, with no output and no
+    // way to tell it apart from a slow run. This test's own timeout is the
+    // real assertion.
+    let dir = workspace(10);
+    fs::write(
+        dir.path().join("hang.py"),
+        "import sys, time\n\
+         for line in sys.stdin:\n\
+         \x20   time.sleep(600)\n",
+    )
+    .unwrap();
+
+    rlt(&dir)
+        .args(["train", "--dataset", "./hang.py", "--script-timeout", "1"])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("stopped answering"));
+}
+
+#[test]
 fn a_working_reward_script_trains_to_completion() {
     let dir = workspace(400);
     fs::write(

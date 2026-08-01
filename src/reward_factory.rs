@@ -13,6 +13,7 @@ use std::error::Error;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// Consecutive reward failures tolerated before the run is abandoned.
 ///
@@ -46,13 +47,17 @@ pub struct RewardFactory {
 
 impl RewardFactory {
     /// Build a factory, starting the reward script if one was configured.
-    pub fn new(script_path: Option<&Path>, stop: Arc<StopSignal>) -> Result<Self, Box<dyn Error>> {
+    pub fn new(
+        script_path: Option<&Path>,
+        stop: Arc<StopSignal>,
+        timeout: Option<Duration>,
+    ) -> Result<Self, Box<dyn Error>> {
         let worker = match script_path {
             Some(path) => {
                 let path = path
                     .to_str()
                     .ok_or_else(|| format!("reward script path is not valid UTF-8: {:?}", path))?;
-                Some(Mutex::new(PythonWorker::spawn(path)?))
+                Some(Mutex::new(PythonWorker::spawn(path, timeout)?))
             }
             None => None,
         };

@@ -36,6 +36,10 @@ pub struct TrainArgs {
     #[arg(long, value_name = "PATH")]
     pub reward_script: Option<String>,
 
+    /// Seconds to wait for a Python script to answer; 0 waits forever [default: 30]
+    #[arg(long, value_name = "SECS")]
+    pub script_timeout: Option<u64>,
+
     /// Compute backend to run on (overrides the config file; defaults to cpu)
     #[arg(long, value_enum)]
     pub backend: Option<Backend>,
@@ -78,6 +82,10 @@ pub struct InferArgs {
     /// Include the input features in each output record
     #[arg(long)]
     pub with_features: bool,
+
+    /// Seconds to wait for a Python script to answer; 0 waits forever [default: 30]
+    #[arg(long, value_name = "SECS")]
+    pub script_timeout: Option<u64>,
 }
 
 #[derive(clap::Args, Debug)]

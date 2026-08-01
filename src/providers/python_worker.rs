@@ -15,10 +15,17 @@
 //!     request = json.loads(line)
 //!     print(json.dumps(handle(request)), flush=True)
 //! ```
+//!
+//! Responses are read on a separate thread. A blocked `read_line` cannot be
+//! given a deadline, so a script that reads a request and never answers would
+//! otherwise hang the CLI with no output at all.
 
 use std::error::Error;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::thread;
+use std::time::Duration;
 
 /// Interpreters tried, in order, when starting a script.
 const INTERPRETERS: [&str; 2] = ["python3", "python"];
@@ -28,12 +35,17 @@ pub struct PythonWorker {
     child: Child,
     /// `Option` so it can be closed before the process is reaped.
     stdin: Option<ChildStdin>,
-    stdout: BufReader<ChildStdout>,
+    /// Lines the reader thread has taken off the script's stdout.
+    responses: Receiver<std::io::Result<String>>,
+    /// How long to wait for one response. `None` waits forever.
+    timeout: Option<Duration>,
+    /// Why the worker can no longer be used, once that is true.
+    dead: Option<String>,
 }
 
 impl PythonWorker {
     /// Start the interpreter for `script_path`. Done once per run.
-    pub fn spawn(script_path: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn spawn(script_path: &str, timeout: Option<Duration>) -> Result<Self, Box<dyn Error>> {
         let mut child = spawn_interpreter(script_path)?;
 
         let stdin = child
@@ -51,37 +63,69 @@ impl PythonWorker {
             script: script_path.to_string(),
             child,
             stdin: Some(stdin),
-            stdout: BufReader::new(stdout),
+            responses: spawn_reader(stdout),
+            timeout,
+            dead: None,
         })
     }
 
     /// Send one request line and read one response line.
     ///
-    /// The script exiting, or answering nothing, is an error rather than a
-    /// hang: a dead worker must be reported, not waited on.
+    /// The script exiting, answering nothing, or missing its deadline is an
+    /// error rather than a hang: a worker that is not answering has to be
+    /// reported, not waited on.
     pub fn request(&mut self, payload: &str) -> Result<String, Box<dyn Error>> {
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or_else(|| format!("Python worker for '{}' is closed", self.script))?;
+        if let Some(reason) = &self.dead {
+            return Err(reason.clone().into());
+        }
 
-        writeln!(stdin, "{}", payload)
-            .and_then(|_| stdin.flush())
-            .map_err(|err| self.describe_death(&format!("failed to send a request: {}", err)))?;
-
-        let mut line = String::new();
-        let read = self
-            .stdout
-            .read_line(&mut line)
-            .map_err(|err| self.describe_death(&format!("failed to read a response: {}", err)))?;
-
-        if read == 0 {
+        let sent = match self.stdin.as_mut() {
+            Some(stdin) => writeln!(stdin, "{}", payload).and_then(|_| stdin.flush()),
+            None => return Err(format!("Python worker for '{}' is closed", self.script).into()),
+        };
+        if let Err(err) = sent {
             return Err(self
-                .describe_death("the script closed its output without answering")
+                .die(&format!("failed to send a request: {}", err))
                 .into());
         }
 
-        Ok(line.trim().to_string())
+        let received = match self.timeout {
+            Some(timeout) => self.responses.recv_timeout(timeout),
+            None => self.responses.recv().map_err(RecvTimeoutError::from),
+        };
+
+        match received {
+            Ok(Ok(line)) => Ok(line.trim().to_string()),
+            Ok(Err(err)) => Err(self
+                .die(&format!("failed to read a response: {}", err))
+                .into()),
+            Err(RecvTimeoutError::Timeout) => {
+                let waited = self.timeout.unwrap_or_default();
+                Err(self
+                    .die(&format!(
+                        "it stopped answering after {:?}. Raise --script-timeout if the \
+                         script is legitimately slow, or set it to 0 to wait forever",
+                        waited
+                    ))
+                    .into())
+            }
+            Err(RecvTimeoutError::Disconnected) => Err(self
+                .die("the script closed its output without answering")
+                .into()),
+        }
+    }
+
+    /// Record why the worker can no longer be used, and build the message.
+    ///
+    /// A worker that missed a deadline stays dead even if the script recovers:
+    /// a late answer would be paired with the *next* request, quietly
+    /// mismatching every feature vector and reward after it.
+    fn die(&mut self, problem: &str) -> String {
+        let message = self.describe_death(problem);
+        if self.dead.is_none() {
+            self.dead = Some(message.clone());
+        }
+        message
     }
 
     /// Build an error message, adding the exit status when the process is gone.
@@ -102,10 +146,41 @@ impl Drop for PythonWorker {
     fn drop(&mut self) {
         // Closing stdin lets a script reading `for line in sys.stdin` finish on
         // its own; kill whatever is still running so no interpreter is leaked.
+        // Killing it also closes the pipe, which ends the reader thread.
         self.stdin.take();
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+/// Pull lines off the script's stdout until it stops producing them.
+///
+/// This thread is what lets [`PythonWorker::request`] wait with a deadline: a
+/// `read_line` already blocked on a pipe cannot be interrupted.
+fn spawn_reader(stdout: ChildStdout) -> Receiver<std::io::Result<String>> {
+    let (sender, receiver) = mpsc::channel();
+
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                // End of output. Dropping the sender is what reports it.
+                Ok(0) => break,
+                Ok(_) => {
+                    if sender.send(Ok(line)).is_err() {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    let _ = sender.send(Err(err));
+                    break;
+                }
+            }
+        }
+    });
+
+    receiver
 }
 
 /// Start the first interpreter on PATH that exists.
@@ -147,4 +222,63 @@ fn spawn_interpreter(script_path: &str) -> Result<Child, Box<dyn Error>> {
             .unwrap_or_else(|| "not found".to_string())
     )
     .into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Write a script to a temporary directory and start a worker on it.
+    ///
+    /// The directory is returned so it outlives the worker.
+    fn worker(body: &str, timeout: Option<Duration>) -> (tempfile::TempDir, PythonWorker) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let script = dir.path().join("script.py");
+        std::fs::write(&script, body).unwrap();
+
+        let worker = PythonWorker::spawn(script.to_str().unwrap(), timeout).unwrap();
+        (dir, worker)
+    }
+
+    #[test]
+    fn a_responsive_script_is_answered_within_the_deadline() {
+        let (_dir, mut worker) = worker(
+            "import sys\nfor line in sys.stdin:\n    print('[1, 2]', flush=True)\n",
+            Some(Duration::from_secs(10)),
+        );
+
+        assert_eq!(worker.request("{}").unwrap(), "[1, 2]");
+    }
+
+    #[test]
+    fn a_script_that_never_answers_times_out() {
+        // Regression: this blocked in read_line forever, with no output and no
+        // way to tell it apart from a slow run.
+        let (_dir, mut worker) = worker(
+            "import sys, time\nfor line in sys.stdin:\n    time.sleep(60)\n",
+            Some(Duration::from_millis(200)),
+        );
+
+        let error = worker.request("{}").unwrap_err().to_string();
+        assert!(error.contains("stopped answering"), "{}", error);
+    }
+
+    #[test]
+    fn a_worker_that_missed_its_deadline_stays_dead() {
+        // A late answer would be paired with the next request, quietly
+        // mismatching every feature vector and reward after it.
+        let (_dir, mut worker) = worker(
+            "import sys, time\n\
+             for line in sys.stdin:\n\
+             \x20   time.sleep(0.5)\n\
+             \x20   print('[1, 2]', flush=True)\n",
+            Some(Duration::from_millis(100)),
+        );
+
+        assert!(worker.request("{}").is_err());
+        thread::sleep(Duration::from_millis(700));
+
+        let error = worker.request("{}").unwrap_err().to_string();
+        assert!(error.contains("stopped answering"), "{}", error);
+    }
 }

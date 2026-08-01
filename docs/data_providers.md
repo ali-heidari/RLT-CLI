@@ -112,9 +112,31 @@ two of them per step when a reward script was also in use. On a measured
 
 - If the script exits, the CLI reports the exit status and the last error rather
   than hanging.
+- **A script that reads a request and never answers times out** after
+  `--script-timeout` seconds (default `30`):
+
+  ```text
+  Python script './provider.py': it stopped answering after 30s. Raise
+  --script-timeout if the script is legitimately slow, or set it to 0 to
+  wait forever.
+  ```
+
+  A worker that has missed one deadline is not used again, even if the script
+  recovers: a late answer would be paired with the *next* request and quietly
+  mismatch every feature vector after it.
 - Stderr is inherited, so tracebacks appear in your terminal as they happen.
 - A response that is not numeric is an error naming the offending value.
 - Provider failures follow the same skip/count/abort rules as CSV rows above.
+
+### Timeout
+
+| Flag | Config key | Default | Meaning |
+| --- | --- | --- | --- |
+| `--script-timeout SECS` | `script_timeout_secs` | `30` | Seconds to wait for one response; `0` waits forever |
+
+The deadline applies to both the data provider and the
+[reward script](reward_factory.md). Raise it for a script that calls a slow API;
+set it to `0` only if you would rather have the CLI wait indefinitely than fail.
 
 ### Usage
 

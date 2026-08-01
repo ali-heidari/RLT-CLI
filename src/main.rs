@@ -31,6 +31,13 @@ const DEFAULT_REPLY_CAPACITY: usize = 4096;
 const DEFAULT_LOG_INTERVAL: u64 = 64;
 const DEFAULT_EPOCHS: u32 = 10;
 
+/// How long a Python script may take to answer one request.
+///
+/// Generous, because the cost of being wrong in one direction is a spurious
+/// failure and in the other is a CLI that hangs with no output at all. `0`
+/// disables the deadline.
+const DEFAULT_SCRIPT_TIMEOUT_SECS: u64 = 30;
+
 /// Training batches that one `--epochs` unit maps to.
 const BATCHES_PER_EPOCH: usize = 100;
 
@@ -58,6 +65,7 @@ struct FileConfig {
     reward_script: Option<String>,
     has_header: Option<bool>,
     delimiter: Option<char>,
+    script_timeout_secs: Option<u64>,
 }
 
 /// Where an effective value came from, reported by the settings block.
@@ -142,7 +150,30 @@ struct Resolved {
     reward_script: Option<String>,
     csv_has_header: bool,
     csv_delimiter: char,
+    /// How long a Python script may take to answer. `None` waits forever.
+    script_timeout: Option<std::time::Duration>,
     provenance: Vec<(&'static str, String, Source)>,
+}
+
+/// Resolve the Python script deadline and describe where it came from.
+///
+/// Zero means "wait forever", which is what the CLI did before the deadline
+/// existed — kept as the escape hatch for a legitimately slow script.
+fn resolve_script_timeout(
+    flag: Option<u64>,
+    file: Option<u64>,
+) -> (Option<std::time::Duration>, String, Source) {
+    let (seconds, source) = resolve(flag, file, DEFAULT_SCRIPT_TIMEOUT_SECS);
+
+    let (timeout, shown) = match seconds {
+        0 => (None, "disabled (wait forever)".to_string()),
+        seconds => (
+            Some(std::time::Duration::from_secs(seconds)),
+            format!("{}s", seconds),
+        ),
+    };
+
+    (timeout, shown, source)
 }
 
 /// Resolve the CSV reader options and describe where they came from.
@@ -236,6 +267,8 @@ fn resolve_train(file: &FileConfig, args: &TrainArgs) -> Resolved {
 
     let (csv_has_header, csv_delimiter, csv_provenance) =
         resolve_csv(args.has_header, args.delimiter, file);
+    let (script_timeout, script_timeout_shown, script_timeout_source) =
+        resolve_script_timeout(args.script_timeout, file.script_timeout_secs);
 
     let mut provenance = vec![
         ("dataset", show(&dataset, "<not set>"), dataset_source),
@@ -282,6 +315,15 @@ fn resolve_train(file: &FileConfig, args: &TrainArgs) -> Resolved {
         provenance.extend(csv_provenance);
     }
 
+    // ...and the script deadline is noise when no script is involved at all.
+    if is_python_dataset(&dataset) || reward_script.is_some() {
+        provenance.push((
+            "script timeout",
+            script_timeout_shown,
+            script_timeout_source,
+        ));
+    }
+
     Resolved {
         config: aixker_rlt::configurations::Configurations {
             interval_secs: file.interval_secs.unwrap_or(DEFAULT_INTERVAL_SECS),
@@ -300,6 +342,7 @@ fn resolve_train(file: &FileConfig, args: &TrainArgs) -> Resolved {
         reward_script,
         csv_has_header,
         csv_delimiter,
+        script_timeout,
         provenance,
     }
 }
@@ -316,6 +359,8 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
     let (dataset, dataset_source) = resolve_opt(args.dataset.clone(), file.dataset.clone());
     let (csv_has_header, csv_delimiter, csv_provenance) =
         resolve_csv(args.has_header, args.delimiter, file);
+    let (script_timeout, script_timeout_shown, script_timeout_source) =
+        resolve_script_timeout(args.script_timeout, file.script_timeout_secs);
 
     let (actions_output, actions_output_source) =
         resolve(args.output.clone(), None, STDOUT_DESTINATION.to_string());
@@ -352,8 +397,15 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
         ),
     ];
 
-    // The CSV reader options are noise for a Python data provider.
-    if !is_python_dataset(&dataset) {
+    // The CSV reader options are noise for a Python data provider, and the
+    // script deadline is noise for anything else.
+    if is_python_dataset(&dataset) {
+        provenance.push((
+            "script timeout",
+            script_timeout_shown,
+            script_timeout_source,
+        ));
+    } else {
         provenance.extend(csv_provenance);
     }
 
@@ -377,6 +429,7 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
         reward_script: None,
         csv_has_header,
         csv_delimiter,
+        script_timeout,
         provenance,
     }
 }
@@ -469,7 +522,11 @@ async fn run_train(
     // The reward factory ends the run through this; the data source is what
     // the library actually listens to.
     let stop = StopSignal::new();
-    let reward_factory = RewardFactory::new(reward_script.as_deref(), stop.clone())?;
+    let reward_factory = RewardFactory::new(
+        reward_script.as_deref(),
+        stop.clone(),
+        resolved.script_timeout,
+    )?;
 
     // Determine which data provider to use based on file extension
     let is_python_script = dataset_path.ends_with(".py");
@@ -479,7 +536,7 @@ async fn run_train(
 
     if is_python_script {
         log::info!("using Python script data provider from {}", dataset_path);
-        let provider = open_python_script(&dataset_path)?;
+        let provider = open_python_script(&dataset_path, resolved.script_timeout)?;
 
         let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
         let width = source.validate_first()?;
@@ -644,7 +701,7 @@ async fn run_infer(
 
     if is_python_script {
         log::info!("using Python script data provider from {}", dataset_path);
-        let provider = open_python_script(&dataset_path)?;
+        let provider = open_python_script(&dataset_path, resolved.script_timeout)?;
 
         let mut source = FeatureSource::new(provider, input_number);
         let width = source.validate_first()?;
@@ -844,6 +901,7 @@ mod tests {
             backend: None,
             has_header: None,
             delimiter: None,
+            script_timeout: None,
         }
     }
 
@@ -964,6 +1022,57 @@ mod tests {
             checkpoint_path("m.json"),
             PathBuf::from("./models/m.json.m.json")
         );
+    }
+
+    #[test]
+    fn a_zero_script_timeout_means_wait_forever() {
+        // The escape hatch for a legitimately slow script, and what the CLI did
+        // before the deadline existed.
+        let (timeout, shown, source) = resolve_script_timeout(Some(0), None);
+        assert!(timeout.is_none());
+        assert!(shown.contains("wait forever"), "{}", shown);
+        assert_eq!(source, Source::Flag);
+
+        let (timeout, shown, _) = resolve_script_timeout(None, Some(5));
+        assert_eq!(timeout, Some(std::time::Duration::from_secs(5)));
+        assert_eq!(shown, "5s");
+
+        let (timeout, _, source) = resolve_script_timeout(None, None);
+        assert_eq!(
+            timeout,
+            Some(std::time::Duration::from_secs(DEFAULT_SCRIPT_TIMEOUT_SECS))
+        );
+        assert_eq!(source, Source::Default);
+    }
+
+    #[test]
+    fn the_script_timeout_is_reported_only_when_a_script_is_involved() {
+        let names = |resolved: &Resolved| -> Vec<&'static str> {
+            resolved
+                .provenance
+                .iter()
+                .map(|(name, _, _)| *name)
+                .collect()
+        };
+
+        let csv_only = resolve_train(
+            &FileConfig::default(),
+            &TrainArgs {
+                dataset: Some("data.csv".to_string()),
+                ..train_args()
+            },
+        );
+        assert!(!names(&csv_only).contains(&"script timeout"));
+
+        let with_reward = resolve_train(
+            &FileConfig::default(),
+            &TrainArgs {
+                dataset: Some("data.csv".to_string()),
+                reward_script: Some("reward.py".to_string()),
+                ..train_args()
+            },
+        );
+        assert!(names(&with_reward).contains(&"script timeout"));
     }
 
     #[test]

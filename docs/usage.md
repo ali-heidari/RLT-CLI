@@ -107,6 +107,11 @@ reports the real path in its messages so you can always find the file.
 - `--reward-script PATH`
   - Python script computing reward and success per step. See
     [reward_factory.md](reward_factory.md).
+- `--script-timeout SECS`
+  - How long a Python script may take to answer one request, for both the data
+    provider and the reward script. Default: `30`. `0` waits forever, which is
+    what the CLI did before the deadline existed. Reported in the settings block
+    only when a script is actually in use.
 - `--backend [cpu|gpu]`
   - Compute backend. Default: `cpu`. `gpu` uses wgpu compute shaders
     (Vulkan/Metal/DX12 — NVIDIA, AMD, Intel, Apple Silicon; no CUDA required)
@@ -122,6 +127,7 @@ reports the real path in its messages so you can always find the file.
 - `--model-name NAME` — checkpoint to load. Required.
 - `--backend [cpu|gpu]` — as for `train`.
 - `--has-header [true|false]`, `--delimiter CHAR` — as for `train`.
+- `--script-timeout SECS` — as for `train`.
 - `--output PATH`
   - Where the decisions go. `-` is stdout. Default: `-`. Parent directories are
     created as needed.
@@ -199,6 +205,7 @@ All keys are optional. See [Config.sample.toml](../Config.sample.toml).
 | `backend` | `--backend` | `"Cpu"` |
 | `has_header` | `--has-header` | `false` |
 | `delimiter` | `--delimiter` | `","` |
+| `script_timeout_secs` | `--script-timeout` | `30` |
 
 `input_number` must match the number of values in each row of your data; a
 mismatch is reported before training starts.

@@ -87,6 +87,11 @@ not a useful objective.
   shown.
 - **A script that dies mid-run** is reported with its exit status rather than
   hanging the CLI.
+- **A script that never answers** times out after `--script-timeout` seconds
+  (default `30`, `0` waits forever) and counts as a failure like any other. The
+  first timeout costs the full wait; after that the worker is not used again, so
+  the abort below arrives promptly instead of ten deadlines apart. See
+  [data_providers.md](data_providers.md#timeout).
 - **Invalid JSON, or a missing field**, is logged at error level and that step
   falls back to `(0.0, false)`. A single bad answer does not end the run: a
   script with an occasional hiccup should not kill a long one.
