@@ -202,7 +202,12 @@ than running an untrained model.
 ### `export`
 
 - `--checkpoint PATH`
-  - Checkpoint to export. Defaults to the configured model under `./models/`.
+  - Checkpoint to export, as a path. Defaults to the configured model under
+    `./models/`.
+- `--model-name NAME`
+  - Checkpoint to export, resolved under `./models/` the same way `train` and
+    `infer` resolve it. Mutually exclusive with `--checkpoint`; passing both is
+    an error rather than one silently winning.
 - `--output PATH`
   - Destination. Default: `./exported/model.json`. Parent directories are
     created as needed.

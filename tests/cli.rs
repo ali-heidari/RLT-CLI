@@ -519,6 +519,67 @@ fn a_header_row_needs_the_flag() {
 }
 
 #[test]
+fn export_accepts_a_model_name() {
+    // train and infer both take --model-name; export used to accept only
+    // --checkpoint or whatever the config file happened to say.
+    let dir = workspace(400);
+
+    rlt(&dir)
+        .args(["train", "--dataset", "./data.csv"])
+        .assert()
+        .success();
+
+    rlt(&dir)
+        .args([
+            "export",
+            "--model-name",
+            "test-model.json",
+            "--output",
+            "./exported/by-name.json",
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read(dir.path().join("exported/by-name.json")).unwrap(),
+        fs::read(dir.path().join(CHECKPOINT)).unwrap(),
+    );
+}
+
+#[test]
+fn export_rejects_a_checkpoint_and_a_model_name_together() {
+    // Silently preferring one would be the same class of bug as the settings
+    // that used to be accepted and ignored.
+    let dir = workspace(10);
+
+    rlt(&dir)
+        .args([
+            "export",
+            "--checkpoint",
+            "./a.json",
+            "--model-name",
+            "b.json",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn export_refuses_a_directory_at_the_checkpoint_path() {
+    // Regression: a directory has a non-zero length, so it passed the
+    // emptiness guard and failed later with a raw copy error.
+    let dir = workspace(10);
+    fs::create_dir_all(dir.path().join(CHECKPOINT)).unwrap();
+
+    rlt(&dir)
+        .args(["export", "--output", "./exported/model.json"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a file"));
+}
+
+#[test]
 fn export_refuses_a_checkpoint_that_holds_no_model() {
     let dir = workspace(10);
     fs::create_dir_all(dir.path().join("models")).unwrap();

@@ -99,6 +99,10 @@ pub struct ExportArgs {
     #[arg(long, value_name = "PATH")]
     pub checkpoint: Option<String>,
 
+    /// Name of the model checkpoint to export, resolved under ./models
+    #[arg(long, value_name = "NAME", conflicts_with = "checkpoint")]
+    pub model_name: Option<String>,
+
     /// Output path for the exported model
     #[arg(long, value_name = "PATH", default_value = "./exported/model.json")]
     pub output: String,

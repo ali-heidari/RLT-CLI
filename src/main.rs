@@ -165,6 +165,15 @@ fn checkpoint_path(model_name: &str) -> PathBuf {
 fn ensure_checkpoint(checkpoint: &Path, hint: &str) -> Result<(), Box<dyn std::error::Error>> {
     match fs::metadata(checkpoint) {
         Err(_) => Err(format!("checkpoint not found: {}. {}", checkpoint.display(), hint).into()),
+        // A directory has a non-zero length of its own, so the emptiness check
+        // below would wave it through and leave the real complaint to a raw
+        // copy or load error much later.
+        Ok(metadata) if !metadata.is_file() => Err(format!(
+            "checkpoint path is not a file: {}. {}",
+            checkpoint.display(),
+            hint
+        )
+        .into()),
         Ok(metadata) if metadata.len() == 0 => Err(format!(
             "checkpoint is empty: {}. The model was never saved; train it again.",
             checkpoint.display()
@@ -174,12 +183,21 @@ fn ensure_checkpoint(checkpoint: &Path, hint: &str) -> Result<(), Box<dyn std::e
     }
 }
 
+/// Whether a path selects the Python-script provider rather than CSV.
+///
+/// Compared without regard to case: Windows filesystems are case-insensitive,
+/// so `provider.PY` names the same file as `provider.py` and was being read as
+/// CSV.
+fn is_python_path(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .map(|extension| extension.eq_ignore_ascii_case("py"))
+        .unwrap_or(false)
+}
+
 /// Whether a dataset path selects the Python-script provider rather than CSV.
 fn is_python_dataset(dataset: &Option<String>) -> bool {
-    dataset
-        .as_deref()
-        .map(|path| path.ends_with(".py"))
-        .unwrap_or(false)
+    dataset.as_deref().map(is_python_path).unwrap_or(false)
 }
 
 /// Same as [`resolve`] for settings that may legitimately stay unset.
@@ -618,8 +636,7 @@ async fn run_train(
         resolved.script_timeout,
     )?;
 
-    // Determine which data provider to use based on file extension
-    let is_python_script = dataset_path.ends_with(".py");
+    let is_python_script = is_python_path(&dataset_path);
 
     let config = Arc::new(config);
     let input_number = config.input_number;
@@ -782,8 +799,7 @@ async fn run_infer(
 
     let config = Arc::new(config);
 
-    // Determine which data provider to use based on file extension
-    let is_python_script = dataset_path.ends_with(".py");
+    let is_python_script = is_python_path(&dataset_path);
 
     aixker_rlt::initialize(config.clone());
 
@@ -854,11 +870,16 @@ fn run_export(
     out: Output,
     args: ExportArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let checkpoint = match &args.checkpoint {
-        Some(path) => PathBuf::from(path),
-        None => {
+    // --checkpoint names a path directly; --model-name is resolved under
+    // ./models the same way train and infer resolve it. clap rejects both at
+    // once, so neither can silently win.
+    let checkpoint = match (&args.checkpoint, &args.model_name) {
+        (Some(path), _) => PathBuf::from(path),
+        (None, Some(model_name)) => checkpoint_path(model_name),
+        (None, None) => {
             let model_name = file_config.model_name.as_deref().ok_or(
-                "no checkpoint to export: pass --checkpoint, or set model_name in the config file",
+                "no checkpoint to export: pass --checkpoint or --model-name, \
+                 or set model_name in the config file",
             )?;
             checkpoint_path(model_name)
         }
@@ -1294,6 +1315,32 @@ mod tests {
         assert!(is_python_dataset(&Some("provider.py".to_string())));
         assert!(!is_python_dataset(&Some("data.csv".to_string())));
         assert!(!is_python_dataset(&None));
+    }
+
+    #[test]
+    fn the_python_extension_is_matched_without_regard_to_case() {
+        // Regression: Windows filesystems are case-insensitive, so provider.PY
+        // names the same file as provider.py — and was read as CSV.
+        assert!(is_python_path("provider.PY"));
+        assert!(is_python_path("provider.Py"));
+        assert!(is_python_dataset(&Some("provider.PY".to_string())));
+
+        // An extension, not a suffix: a file merely ending in those letters is
+        // not a script.
+        assert!(!is_python_path("notpy"));
+        assert!(!is_python_path("data.csv"));
+    }
+
+    #[test]
+    fn a_directory_is_not_a_usable_checkpoint() {
+        // Regression: a directory's own length is non-zero, so it passed the
+        // emptiness guard and failed later with a raw copy error instead.
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("checkpoint-shaped-directory");
+        std::fs::create_dir(&path).unwrap();
+
+        let error = ensure_checkpoint(&path, "hint").unwrap_err().to_string();
+        assert!(error.contains("not a file"), "{}", error);
     }
 
     #[test]
