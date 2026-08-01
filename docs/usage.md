@@ -247,6 +247,43 @@ policy. Full details in [eval.md](eval.md).
 Evaluation never sleeps between samples: it is a batch pass over a held-out
 file, so `interval_secs` does not apply.
 
+### `inspect`
+
+Reports what a checkpoint actually holds. Checkpoints are JSON, but that only
+makes them technically readable — four tensors of bare numbers and a snapshot.
+
+- `--checkpoint PATH` — the checkpoint, as a path.
+- `--model-name NAME` — resolved under `./models/`. Mutually exclusive with
+  `--checkpoint`.
+- `--format [text|json]` — default `text`.
+
+```console
+$ RLT-CLI inspect --model-name my-model.json
+Checkpoint: ./models/my-model.json.my-model.json (4169 bytes)
+Node id:    my-model.json
+
+Architecture
+  12 -> 16 -> 3
+  259 parameters
+
+Tensors
+  b1   [16]           16 values   min      -0.0000  max    3446.6870  mean     659.1670
+  w1   [12, 16]      192 values   min      -0.0982  max  887513.5000  mean   40460.4545
+
+Warnings
+  w1 reaches 8.8751e5: the run probably diverged rather than converged
+```
+
+The **Warnings** section is the reason to reach for this command. A model whose
+weights have run away to `1e6`, or that holds a non-finite value, still loads
+and still answers — it just answers badly, which is indistinguishable from a
+model that merely trained poorly. Warnings also go to the log, so they show up
+in CI output that only captures logs.
+
+The last training snapshot is printed too: the logits, probabilities, reward and
+action counts from the final batch. Logits like `[0.0, -50.0, -50.0]` mean the
+policy has collapsed onto one action.
+
 ### `export`
 
 - `--checkpoint PATH`

@@ -88,6 +88,9 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
   JSON line per decision to stdout or to `--output PATH`
 - `eval` subcommand for scoring a checkpoint against held-out data and comparing
   it with the heuristic you run today — see [docs/eval.md](docs/eval.md)
+- `inspect` subcommand reporting a checkpoint's architecture, parameter count
+  and **weight health** — diverged or non-finite weights load silently and only
+  show up as poor decisions otherwise
 - `export` subcommand for exporting trained models
 - CPU or GPU compute via `--backend [cpu|gpu]` (CPU default; GPU via wgpu, no CUDA needed)
 - Python reward factory and Python data provider integration, each backed by a

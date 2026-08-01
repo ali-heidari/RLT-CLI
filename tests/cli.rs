@@ -773,6 +773,61 @@ fn eval_without_a_checkpoint_fails_instead_of_scoring_random_weights() {
 }
 
 #[test]
+fn inspect_reports_the_architecture_and_parameter_count() {
+    let dir = trained_workspace();
+
+    rlt(&dir)
+        .arg("inspect")
+        .assert()
+        .success()
+        // Six inputs and three outputs, from the shared test config.
+        .stdout(predicate::str::contains("6 -> 8 -> 3"))
+        .stdout(predicate::str::contains("parameters"))
+        .stdout(predicate::str::contains("Tensors"));
+}
+
+#[test]
+fn inspect_emits_json_on_request() {
+    let dir = trained_workspace();
+
+    let stdout = rlt(&dir)
+        .args(["inspect", "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+
+    assert!(stdout.contains("\"parameters\""), "{}", stdout);
+    assert!(stdout.contains("\"architecture\""), "{}", stdout);
+    assert!(stdout.contains("\"tensors\""), "{}", stdout);
+}
+
+#[test]
+fn inspect_rejects_something_that_is_not_a_checkpoint() {
+    let dir = workspace(10);
+    fs::write(dir.path().join("notes.txt"), "just some text\n").unwrap();
+
+    rlt(&dir)
+        .args(["inspect", "--checkpoint", "./notes.txt"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not valid JSON"));
+}
+
+#[test]
+fn inspect_without_a_checkpoint_says_so() {
+    let dir = workspace(10);
+
+    rlt(&dir)
+        .args(["inspect", "--model-name", "ghost.json"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("checkpoint not found"));
+}
+
+#[test]
 fn export_accepts_a_model_name() {
     // train and infer both take --model-name; export used to accept only
     // --checkpoint or whatever the config file happened to say.

@@ -2,13 +2,16 @@ mod action_writer;
 mod cli;
 mod eval;
 mod init;
+mod inspect;
 mod providers;
 mod reward_factory;
 mod stop_signal;
 
 use action_writer::{ActionWriter, STDOUT_DESTINATION};
 use clap::Parser;
-use cli::commands::{EvalArgs, ExportArgs, InferArgs, InitArgs, ReportFormat, TrainArgs};
+use cli::commands::{
+    EvalArgs, ExportArgs, InferArgs, InitArgs, InspectArgs, ReportFormat, TrainArgs,
+};
 use cli::{Cli, Commands};
 use eval::{Baseline, PolicyStats, Report};
 use providers::csv_dataset::{open_csv_dataset, CsvOptions};
@@ -1166,6 +1169,74 @@ async fn run_eval(
     Ok(())
 }
 
+/// Work out which checkpoint a command was pointed at.
+///
+/// `--checkpoint` names a path directly; `--model-name` is resolved under
+/// `./models` the way `train` and `infer` resolve it; otherwise the config
+/// file's `model_name` applies. clap rejects the first two together, so neither
+/// can silently win.
+fn resolve_checkpoint(
+    explicit: &Option<String>,
+    model_name: &Option<String>,
+    file_config: &FileConfig,
+    absent: &str,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    match (explicit, model_name) {
+        (Some(path), _) => Ok(PathBuf::from(path)),
+        (None, Some(name)) => Ok(checkpoint_path(name)),
+        (None, None) => {
+            let name = file_config.model_name.as_deref().ok_or_else(|| {
+                format!(
+                    "{}: pass --checkpoint or --model-name, or set model_name in \
+                     the config file",
+                    absent
+                )
+            })?;
+            Ok(checkpoint_path(name))
+        }
+    }
+}
+
+/// Report what a checkpoint holds.
+fn run_inspect(
+    file_config: &FileConfig,
+    out: Output,
+    args: InspectArgs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let checkpoint = resolve_checkpoint(
+        &args.checkpoint,
+        &args.model_name,
+        file_config,
+        "no checkpoint to inspect",
+    )?;
+
+    ensure_checkpoint(
+        &checkpoint,
+        "Train a model first, or pass --checkpoint with an existing path.",
+    )?;
+
+    let bytes = fs::metadata(&checkpoint)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let text = fs::read_to_string(&checkpoint)
+        .map_err(|err| format!("failed to read '{}': {}", checkpoint.display(), err))?;
+
+    let parsed = inspect::parse(&checkpoint.display().to_string(), bytes, &text)?;
+
+    // Worth a warning of its own: someone reading logs rather than the report
+    // should still learn that the weights are unusable.
+    for warning in &parsed.warnings {
+        log::warn!("{}", warning);
+    }
+
+    match args.format {
+        ReportFormat::Text => out.line(parsed.to_string()),
+        ReportFormat::Json => out.line(parsed.to_json()?),
+    }
+
+    Ok(())
+}
+
 /// Copy a trained checkpoint to an output path.
 ///
 /// `--format json` performs no conversion: checkpoints are already JSON and the
@@ -1177,20 +1248,12 @@ fn run_export(
     out: Output,
     args: ExportArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // --checkpoint names a path directly; --model-name is resolved under
-    // ./models the same way train and infer resolve it. clap rejects both at
-    // once, so neither can silently win.
-    let checkpoint = match (&args.checkpoint, &args.model_name) {
-        (Some(path), _) => PathBuf::from(path),
-        (None, Some(model_name)) => checkpoint_path(model_name),
-        (None, None) => {
-            let model_name = file_config.model_name.as_deref().ok_or(
-                "no checkpoint to export: pass --checkpoint or --model-name, \
-                 or set model_name in the config file",
-            )?;
-            checkpoint_path(model_name)
-        }
-    };
+    let checkpoint = resolve_checkpoint(
+        &args.checkpoint,
+        &args.model_name,
+        file_config,
+        "no checkpoint to export",
+    )?;
 
     out.line("Exporting model with the following settings:");
     out.line(format!("  checkpoint: {}", checkpoint.display()));
@@ -1311,6 +1374,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Init(args) => run_init(out, args)?,
         Commands::Train(args) => run_train(&file_config, config_file.as_deref(), out, args).await?,
+        Commands::Inspect(args) => run_inspect(&file_config, out, args)?,
         Commands::Export(args) => run_export(&file_config, out, args)?,
         Commands::Infer(args) => run_infer(&file_config, config_file.as_deref(), out, args).await?,
         Commands::Eval(args) => run_eval(&file_config, config_file.as_deref(), out, args).await?,

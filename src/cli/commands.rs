@@ -10,8 +10,26 @@ pub enum Commands {
     Infer(InferArgs),
     /// Score a checkpoint against a held-out dataset, optionally versus a baseline
     Eval(EvalArgs),
+    /// Report a checkpoint's architecture, size, and weight health
+    Inspect(InspectArgs),
     /// Export a trained model to a supported format
     Export(ExportArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct InspectArgs {
+    /// Path to the checkpoint to inspect
+    /// [default: the configured model under ./models]
+    #[arg(long, value_name = "PATH")]
+    pub checkpoint: Option<String>,
+
+    /// Name of the checkpoint to inspect, resolved under ./models
+    #[arg(long, value_name = "NAME", conflicts_with = "checkpoint")]
+    pub model_name: Option<String>,
+
+    /// How to present the report
+    #[arg(long, value_enum, default_value_t = ReportFormat::Text)]
+    pub format: ReportFormat,
 }
 
 #[derive(clap::Args, Debug)]
