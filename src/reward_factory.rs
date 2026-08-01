@@ -48,6 +48,24 @@ pub struct RewardFactory {
     /// Atomic for the same reason the worker is behind a `Mutex`: `evaluate`
     /// only ever gets `&self`.
     consecutive_errors: AtomicUsize,
+    /// The last failure reported, so a script failing the same way over and
+    /// over says so once rather than once per step.
+    last_failure: Mutex<Option<String>>,
+}
+
+/// Decide how loudly to report a failure.
+///
+/// `true` when the message is new and worth an error line, `false` when it
+/// merely repeats the previous one. A script that is broken in one way is one
+/// piece of news; the abort threshold caps a single streak at ten lines, but a
+/// script that fails intermittently over a long run would otherwise fill the
+/// log with copies of the same sentence.
+fn is_new_failure(last: &mut Option<String>, message: &str) -> bool {
+    if last.as_deref() == Some(message) {
+        return false;
+    }
+    *last = Some(message.to_string());
+    true
 }
 
 impl RewardFactory {
@@ -71,6 +89,7 @@ impl RewardFactory {
             worker,
             stop,
             consecutive_errors: AtomicUsize::new(0),
+            last_failure: Mutex::new(None),
         })
     }
 
@@ -91,10 +110,25 @@ impl RewardFactory {
         match ask(worker, &request) {
             Ok(response) => {
                 self.consecutive_errors.store(0, Ordering::Relaxed);
+                // A later failure is news again, even if it reads the same as
+                // one from before the script recovered.
+                if let Ok(mut last) = self.last_failure.lock() {
+                    *last = None;
+                }
                 (response.reward, response.success)
             }
             Err(err) => {
-                log::error!("reward script failed: {}", err);
+                let repeats = match self.last_failure.lock() {
+                    Ok(mut last) => !is_new_failure(&mut last, &err),
+                    // A poisoned lock is itself worth hearing about, so err
+                    // toward saying more rather than less.
+                    Err(_) => false,
+                };
+                if repeats {
+                    log::debug!("reward script failed again: {}", err);
+                } else {
+                    log::error!("reward script failed: {}", err);
+                }
 
                 // Returning (0.0, false) forever is how a run used to "succeed"
                 // having trained entirely on rewards the script never produced.
@@ -129,4 +163,40 @@ fn ask(worker: &Mutex<PythonWorker>, request: &RewardRequest) -> Result<RewardRe
             response, err
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_same_failure_is_only_news_once() {
+        let mut last = None;
+
+        assert!(is_new_failure(&mut last, "invalid JSON response 'nope'"));
+        assert!(!is_new_failure(&mut last, "invalid JSON response 'nope'"));
+        assert!(!is_new_failure(&mut last, "invalid JSON response 'nope'"));
+    }
+
+    #[test]
+    fn a_different_failure_is_reported_again() {
+        // Two things going wrong is two pieces of news, and the second would
+        // otherwise be hidden behind the first.
+        let mut last = None;
+
+        assert!(is_new_failure(&mut last, "the script exited"));
+        assert!(is_new_failure(&mut last, "invalid JSON response 'nope'"));
+        assert!(is_new_failure(&mut last, "the script exited"));
+    }
+
+    #[test]
+    fn a_recovery_makes_the_next_failure_news_again() {
+        let mut last = None;
+        assert!(is_new_failure(&mut last, "the script exited"));
+
+        // What `evaluate` does on a successful answer.
+        last = None;
+
+        assert!(is_new_failure(&mut last, "the script exited"));
+    }
 }
