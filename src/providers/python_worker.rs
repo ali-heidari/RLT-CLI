@@ -28,10 +28,22 @@ use std::thread;
 use std::time::Duration;
 
 /// Interpreters tried, in order, when starting a script.
-const INTERPRETERS: [&str; 2] = ["python3", "python"];
+///
+/// The `py` launcher goes first on Windows. Stock Windows resolves `python3` to
+/// a Microsoft Store alias stub that spawns *successfully* and exits after
+/// printing a message, so a fallback keyed on "not found" never fires and the
+/// user gets a confusing "closed its output without answering" instead.
+#[cfg(windows)]
+const INTERPRETERS: &[&str] = &["py", "python3", "python"];
+#[cfg(not(windows))]
+const INTERPRETERS: &[&str] = &["python3", "python"];
 
 pub struct PythonWorker {
     script: String,
+    /// Interpreters not yet tried. Emptied by the first successful answer: after
+    /// that, a death is a real failure rather than a reason to try another
+    /// interpreter.
+    remaining: Vec<&'static str>,
     child: Child,
     /// `Option` so it can be closed before the process is reaped.
     stdin: Option<ChildStdin>,
@@ -46,31 +58,72 @@ pub struct PythonWorker {
 impl PythonWorker {
     /// Start the interpreter for `script_path`. Done once per run.
     pub fn spawn(script_path: &str, timeout: Option<Duration>) -> Result<Self, Box<dyn Error>> {
-        let mut child = spawn_interpreter(script_path)?;
+        Self::spawn_from(script_path, timeout, INTERPRETERS)
+    }
 
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| format!("could not open stdin for '{}'", script_path))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| format!("could not open stdout for '{}'", script_path))?;
+    /// As [`PythonWorker::spawn`], over a given candidate list.
+    ///
+    /// Separate so a test can supply a stub that behaves like the Store alias
+    /// without needing Windows.
+    fn spawn_from(
+        script_path: &str,
+        timeout: Option<Duration>,
+        candidates: &'static [&'static str],
+    ) -> Result<Self, Box<dyn Error>> {
+        let (child, remaining) = spawn_interpreter(script_path, candidates)?;
 
-        if let Some(stderr) = child.stderr.take() {
-            spawn_stderr_drain(stderr, script_path.to_string());
-        }
-
-        log::debug!("started Python worker for {}", script_path);
-
-        Ok(Self {
+        let mut worker = Self {
             script: script_path.to_string(),
+            remaining,
             child,
-            stdin: Some(stdin),
-            responses: spawn_reader(stdout),
+            stdin: None,
+            responses: mpsc::channel().1,
             timeout,
             dead: None,
-        })
+        };
+        worker.adopt()?;
+
+        log::debug!("started Python worker for {}", script_path);
+        Ok(worker)
+    }
+
+    /// Take the pipes of the freshly spawned child and start draining them.
+    fn adopt(&mut self) -> Result<(), Box<dyn Error>> {
+        let stdin = self
+            .child
+            .stdin
+            .take()
+            .ok_or_else(|| format!("could not open stdin for '{}'", self.script))?;
+        let stdout = self
+            .child
+            .stdout
+            .take()
+            .ok_or_else(|| format!("could not open stdout for '{}'", self.script))?;
+
+        if let Some(stderr) = self.child.stderr.take() {
+            spawn_stderr_drain(stderr, self.script.clone());
+        }
+
+        self.stdin = Some(stdin);
+        self.responses = spawn_reader(stdout);
+        self.dead = None;
+        Ok(())
+    }
+
+    /// Replace the current interpreter with the next candidate.
+    fn restart_with(&mut self, interpreter: &'static str) -> Result<(), Box<dyn Error>> {
+        let child = spawn_one(interpreter, &self.script).map_err(|err| {
+            format!(
+                "failed to start '{}' for '{}': {}",
+                interpreter, self.script, err
+            )
+        })?;
+
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        self.child = child;
+
+        self.adopt()
     }
 
     /// Send one request line and read one response line.
@@ -79,6 +132,36 @@ impl PythonWorker {
     /// error rather than a hang: a worker that is not answering has to be
     /// reported, not waited on.
     pub fn request(&mut self, payload: &str) -> Result<String, Box<dyn Error>> {
+        loop {
+            match self.try_request(payload) {
+                Ok(response) => {
+                    // It answered, so this interpreter is the right one; a later
+                    // death is a real failure, not a reason to try another.
+                    self.remaining.clear();
+                    return Ok(response);
+                }
+                Err(err) => {
+                    // An interpreter that exits before answering the first
+                    // request is the Store-stub signature. A timeout is not:
+                    // that process is alive and simply slow.
+                    if self.remaining.is_empty() || !matches!(self.child.try_wait(), Ok(Some(_))) {
+                        return Err(err);
+                    }
+
+                    let next = self.remaining.remove(0);
+                    log::debug!(
+                        "an interpreter exited without answering for '{}'; trying '{}'",
+                        self.script,
+                        next
+                    );
+                    self.restart_with(next)?;
+                }
+            }
+        }
+    }
+
+    /// One exchange with the interpreter currently running.
+    fn try_request(&mut self, payload: &str) -> Result<String, Box<dyn Error>> {
         if let Some(reason) = &self.dead {
             return Err(reason.clone().into());
         }
@@ -207,26 +290,36 @@ fn spawn_stderr_drain(stderr: ChildStderr, script: String) {
     });
 }
 
-/// Start the first interpreter on PATH that exists.
-fn spawn_interpreter(script_path: &str) -> Result<Child, Box<dyn Error>> {
+/// Start one interpreter on the script.
+fn spawn_one(interpreter: &str, script_path: &str) -> std::io::Result<Child> {
+    Command::new(interpreter)
+        // -u forces unbuffered stdout. Without it a script that forgets
+        // flush=True leaves its response in a pipe buffer and the CLI waits
+        // for a line that has already been written.
+        .arg("-u")
+        .arg(script_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        // Piped and drained by `spawn_stderr_drain`, so the script's
+        // diagnostics obey the CLI's log level like everything else.
+        .stderr(Stdio::piped())
+        .spawn()
+}
+
+/// Start the first candidate that exists, and report the ones left to try.
+///
+/// "Exists" is all that can be checked here: an interpreter that starts and
+/// then exits looks identical to a good one until it fails to answer, which is
+/// why the remaining candidates travel with the worker.
+fn spawn_interpreter(
+    script_path: &str,
+    candidates: &'static [&'static str],
+) -> Result<(Child, Vec<&'static str>), Box<dyn Error>> {
     let mut last_error = None;
 
-    for interpreter in INTERPRETERS {
-        let result = Command::new(interpreter)
-            // -u forces unbuffered stdout. Without it a script that forgets
-            // flush=True leaves its response in a pipe buffer and the CLI waits
-            // for a line that has already been written.
-            .arg("-u")
-            .arg(script_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            // Piped and drained by `spawn_stderr_drain`, so the script's
-            // diagnostics obey the CLI's log level like everything else.
-            .stderr(Stdio::piped())
-            .spawn();
-
-        match result {
-            Ok(child) => return Ok(child),
+    for (index, interpreter) in candidates.iter().enumerate() {
+        match spawn_one(interpreter, script_path) {
+            Ok(child) => return Ok((child, candidates[index + 1..].to_vec())),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => last_error = Some(err),
             Err(err) => {
                 return Err(format!(
@@ -240,7 +333,7 @@ fn spawn_interpreter(script_path: &str) -> Result<Child, Box<dyn Error>> {
 
     Err(format!(
         "no Python interpreter found on PATH (tried {}): {}",
-        INTERPRETERS.join(", "),
+        candidates.join(", "),
         last_error
             .map(|err| err.to_string())
             .unwrap_or_else(|| "not found".to_string())
@@ -262,6 +355,40 @@ mod tests {
 
         let worker = PythonWorker::spawn(script.to_str().unwrap(), timeout).unwrap();
         (dir, worker)
+    }
+
+    /// `/bin/true` accepts any arguments, prints nothing and exits at once —
+    /// exactly how the Microsoft Store's `python3` alias behaves.
+    #[cfg(unix)]
+    const STORE_STUB: &[&str] = &["/bin/true", "python3", "python"];
+
+    #[cfg(unix)]
+    #[test]
+    fn an_interpreter_that_exits_without_answering_falls_through_to_the_next() {
+        // Regression: the fallback only fired on ErrorKind::NotFound, so a stub
+        // that spawns successfully and exits stopped the search dead and the
+        // user got "closed its output without answering" from the wrong
+        // interpreter. This is the Windows Store alias, simulated.
+        let dir = tempfile::TempDir::new().unwrap();
+        let script = dir.path().join("script.py");
+        std::fs::write(
+            &script,
+            "import sys\nfor line in sys.stdin:\n    print('[1, 2]', flush=True)\n",
+        )
+        .unwrap();
+
+        let mut worker = PythonWorker::spawn_from(
+            script.to_str().unwrap(),
+            Some(Duration::from_secs(10)),
+            STORE_STUB,
+        )
+        .unwrap();
+
+        assert_eq!(worker.request("{}").unwrap(), "[1, 2]");
+        assert!(
+            worker.remaining.is_empty(),
+            "a successful answer must stop the search"
+        );
     }
 
     #[test]

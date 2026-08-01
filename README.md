@@ -88,8 +88,13 @@ Windows notes:
 
 - **Python features** (`--dataset *.py`, `--reward-script`): install
   [Python](https://www.python.org/downloads/windows/) and check *"Add python.exe
-  to PATH"* in the installer. The CLI tries `python3` first and falls back to
-  `python` automatically.
+  to PATH"* in the installer. On Windows the CLI tries the `py` launcher first,
+  then `python3`, then `python`. It starts with `py` because stock Windows maps
+  `python3` to a Microsoft Store alias that starts successfully and then exits —
+  a stub the CLI cannot tell from a real interpreter until it fails to answer.
+  If one does turn out to be a stub, the CLI moves on to the next candidate
+  rather than reporting a confusing failure. **Untested:** no CI covers Windows
+  yet (see the roadmap), so treat this as intent rather than a verified claim.
 - **GPU backend** (`--backend gpu`): works out of the box through wgpu's DX12
   (or Vulkan) backend on NVIDIA, AMD, and Intel GPUs — no CUDA required.
 

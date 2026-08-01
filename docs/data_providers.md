@@ -163,7 +163,10 @@ Set `input_number = 12` to use it.
 
 ### Notes
 
-- Python must be on `PATH` as `python3` or `python`.
+- Python must be on `PATH`. Candidates are tried in order: `python3`, then
+  `python` — and on Windows the `py` launcher before both, because stock Windows
+  maps `python3` to a Microsoft Store alias stub. A candidate that starts and
+  then exits without answering is skipped in favour of the next one.
 - The script may keep state between samples in ordinary local variables, since
   the process is no longer restarted.
 - Scripts are executed as given. Only point `--dataset` at a script you trust.

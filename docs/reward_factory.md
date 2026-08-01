@@ -115,7 +115,9 @@ not a useful objective.
 
 ## Notes
 
-- Python must be on `PATH` as `python3` or `python`.
+- Python must be on `PATH`; see
+  [data_providers.md](data_providers.md#notes) for the candidate order and the
+  Windows Store-alias caveat.
 - The script may hold state between steps in ordinary local variables, since the
   process is no longer restarted per call.
 - Scripts are executed as given. Only point `--reward-script` at a script you
