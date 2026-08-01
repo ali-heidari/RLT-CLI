@@ -45,7 +45,7 @@ const _: () = assert!(TRAIN_ROWS > BATCH_SIZE * (TOTAL_BATCHES + 1));
 fn config() -> String {
     format!(
         r#"# Written by `rlt init`. Every key is optional; these match the generated
-# sample data, so `RLT-CLI train` runs with no flags at all.
+# sample data, so `rlt train` runs with no flags at all.
 
 # --- Data ---------------------------------------------------------------
 
@@ -108,7 +108,7 @@ for line in sys.stdin:
 const HEURISTIC_SCRIPT: &str = r#"#!/usr/bin/env python3
 """A plain threshold rule, to compare the trained policy against.
 
-    RLT-CLI eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py
+    rlt eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py
 
 Each request is one JSON line holding the features; each reply names an action.
 This is the shape of "the rule we already run today", and beating it is the

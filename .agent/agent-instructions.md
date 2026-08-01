@@ -1,4 +1,4 @@
-# AION-RLT CLI — Agent Instructions
+# Aixker-RLT CLI — Agent Instructions
 
 This is the master agent instruction file for this repository, per the
 `ai-agent-standards` standard. It MUST live at `.agent/agent-instructions.md`.
@@ -12,7 +12,7 @@ Project additions are allowed; overrides of the base standard are not.
 ## Purpose
 
 This repository provides a Rust CLI for Aixker-RLT model training and export
-operations. `RLT-CLI` is a consumer project built around the AIXKER-RLT
+operations. `aixker-rlt-cli` is a consumer project built around the Aixker-RLT
 framework.
 
 ## Big picture

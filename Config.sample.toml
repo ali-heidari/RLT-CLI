@@ -1,4 +1,4 @@
-# Sample configuration for RLT-CLI.
+# Sample configuration for Aixker-RLT CLI (the `rlt` command).
 #
 # Copy to Config.toml and edit. Every key is optional: an absent key falls back
 # to the built-in default noted beside it. Command-line flags override this

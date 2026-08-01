@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Sample system metrics provider for RLT-CLI.
+Sample system metrics provider for Aixker-RLT CLI.
 
-RLT-CLI starts this script once and keeps it running. For every sample it
+`rlt` starts this script once and keeps it running. For every sample it
 writes one JSON request line to stdin (currently the empty object `{}`) and
 expects exactly one line back on stdout holding the feature vector, either as
 a JSON array or as comma-separated floats:
@@ -146,7 +146,7 @@ def get_system_metrics():
 
 
 def main():
-    # One response per request line, for as long as RLT-CLI keeps asking.
+    # One response per request line, for as long as `rlt` keeps asking.
     for _request in sys.stdin:
         try:
             metrics = get_system_metrics()

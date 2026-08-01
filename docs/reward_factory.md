@@ -1,6 +1,6 @@
 # Reward Factory
 
-During training `RLT-CLI` can delegate reward computation to a Python script of
+During training `rlt` can delegate reward computation to a Python script of
 your own, so the objective is defined where your domain knowledge lives.
 
 Without a reward script the CLI returns a reward of `0.0` and `success: true`
@@ -10,7 +10,7 @@ training meaningful.
 ## Protocol
 
 **The script is started once and kept running for the whole run.** For each
-environment step `RLT-CLI` writes one request line to the script's stdin and
+environment step `rlt` writes one request line to the script's stdin and
 reads one response line from its stdout.
 
 **Request** — one JSON object per line:
@@ -63,7 +63,7 @@ both to long-lived workers took the run from **26.24 s to 0.20 s**.
 ## Usage
 
 ```bash
-RLT-CLI train --dataset ./your-data.csv --model-name my-model.json \
+rlt train --dataset ./your-data.csv --model-name my-model.json \
   --reward-script ./scripts/reward_script.py
 ```
 

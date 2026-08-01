@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Sample reward script for RLT-CLI.
+Sample reward script for Aixker-RLT CLI.
 
-RLT-CLI starts this script once and keeps it running. For every environment
+`rlt` starts this script once and keeps it running. For every environment
 step it writes one JSON line to stdin:
 
     {"features": [0.1, 0.2, ...], "action": 1}

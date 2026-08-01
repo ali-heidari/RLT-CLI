@@ -50,7 +50,7 @@ const BATCHES_PER_EPOCH: usize = 100;
 /// Directory the library keeps checkpoints in.
 const MODELS_DIR: &str = "./models";
 
-/// Everything RLT-CLI reads out of the TOML config file, parsed once per run.
+/// Everything the CLI reads out of the TOML config file, parsed once per run.
 ///
 /// Every field is optional so an absent key falls through to the built-in
 /// default. Unknown keys (`debug`, `mode`, ...) are ignored: the running mode
@@ -921,8 +921,8 @@ fn run_init(out: Output, args: InitArgs) -> Result<(), Box<dyn std::error::Error
 
     out.line("");
     out.line("Next:");
-    out.line("  RLT-CLI train");
-    out.line("  RLT-CLI eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py");
+    out.line("  rlt train");
+    out.line("  rlt eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py");
     out.line("");
     out.line("The reward script defines what \"good\" means; edit it for your problem.");
 
@@ -1360,7 +1360,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let loaded = load_file_config(cli.config.as_ref())?;
 
         out.line(format!(
-            "AIXKER-RLT CLI invoked with log level: {:?}",
+            "Aixker-RLT CLI invoked with log level: {:?}",
             log_level
         ));
         match &loaded.1 {

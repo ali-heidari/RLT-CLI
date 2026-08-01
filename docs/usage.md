@@ -1,7 +1,7 @@
-# RLT-CLI Usage
+# Usage
 
-`RLT-CLI` is a Rust command-line interface for Aixker-RLT model training,
-inference, and export.
+`rlt` is the command installed by `aixker-rlt-cli`: a Rust command-line
+interface for Aixker-RLT model training, evaluation, inference, and export.
 
 ## Build
 
@@ -9,8 +9,8 @@ inference, and export.
 cargo build --release
 ```
 
-The binary is produced at `target/release/RLT-CLI`. Windows builds work the same
-way (`target\release\RLT-CLI.exe`); see the
+The binary is produced at `target/release/rlt`. Windows builds work the same
+way (`target\release\rlt.exe`); see the
 [README "Build (Windows)" section](../README.md#build-windows) for toolchain
 setup, Python-on-PATH notes, and cross-compilation from Linux.
 
@@ -40,27 +40,27 @@ optional — without one, built-in defaults apply.
 Train from a CSV dataset (supply your own data):
 
 ```bash
-RLT-CLI train --dataset ./your-data.csv --epochs 20 --batch-size 64 \
+rlt train --dataset ./your-data.csv --epochs 20 --batch-size 64 \
   --model-name my-model.json
 ```
 
 Train from a Python data provider with a Python reward script:
 
 ```bash
-RLT-CLI train --dataset ./scripts/system_metrics.py --model-name my-model.json \
+rlt train --dataset ./scripts/system_metrics.py --model-name my-model.json \
   --reward-script ./scripts/reward_script.py
 ```
 
 Run inference:
 
 ```bash
-RLT-CLI infer --dataset ./your-data.csv --model-name my-model.json
+rlt infer --dataset ./your-data.csv --model-name my-model.json
 ```
 
 Export a trained checkpoint:
 
 ```bash
-RLT-CLI export --output ./exported/model.json
+rlt export --output ./exported/model.json
 ```
 
 ## Interrupting a run
@@ -182,7 +182,7 @@ train/holdout datasets. See [init.md](init.md).
 One JSON object per sample, one per line:
 
 ```console
-$ RLT-CLI infer --dataset ./infer.csv --model-name my-model.json
+$ rlt infer --dataset ./infer.csv --model-name my-model.json
 {"row":1,"action":2}
 {"row":2,"action":1}
 {"row":3,"action":2}
@@ -191,7 +191,7 @@ $ RLT-CLI infer --dataset ./infer.csv --model-name my-model.json
 `--with-features` adds the input that produced each decision:
 
 ```console
-$ RLT-CLI infer --dataset ./infer.csv --model-name my-model.json --with-features
+$ rlt infer --dataset ./infer.csv --model-name my-model.json --with-features
 {"row":1,"features":[0.1,0.2,0.3,0.4,0.5,0.6],"action":0}
 ```
 
@@ -202,7 +202,7 @@ Records go to stdout and logs go to stderr, so the stream is machine-readable
 without any flags:
 
 ```bash
-RLT-CLI infer --dataset ./infer.csv --model-name my-model.json 2>/dev/null | jq -c
+rlt infer --dataset ./infer.csv --model-name my-model.json 2>/dev/null | jq -c
 ```
 
 `--silent` prints nothing, so it suppresses the records too — unless you also
@@ -265,7 +265,7 @@ makes them technically readable — four tensors of bare numbers and a snapshot.
 - `--format [text|json]` — default `text`.
 
 ```console
-$ RLT-CLI inspect --model-name my-model.json
+$ rlt inspect --model-name my-model.json
 Checkpoint: ./models/my-model.json.my-model.json (4169 bytes)
 Node id:    my-model.json
 

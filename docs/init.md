@@ -1,11 +1,11 @@
 # Getting started with `rlt init`
 
-`RLT-CLI init` scaffolds everything a first run needs, so getting to a trained
+`rlt init` scaffolds everything a first run needs, so getting to a trained
 model is two commands rather than a documentation page.
 
 ```bash
-RLT-CLI init
-RLT-CLI train
+rlt init
+rlt train
 ```
 
 ## What it writes
@@ -20,7 +20,7 @@ RLT-CLI train
 
 `init` refuses to overwrite anything that already exists. Pass `--force` if you
 mean it. Scaffold somewhere other than the current directory with
-`RLT-CLI init path/to/dir`.
+`rlt init path/to/dir`.
 
 ## The generated data
 
@@ -46,7 +46,7 @@ reports can be checked by hand.
 ## Then evaluate it
 
 ```bash
-RLT-CLI eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py
+rlt eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py
 ```
 
 The heuristic splits at the halfway point and so never chooses action 1, which

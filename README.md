@@ -1,4 +1,4 @@
-# RLT-CLI
+# Aixker-RLT CLI
 
 [![CI](https://github.com/ali-heidari/RLT-CLI/actions/workflows/ci.yml/badge.svg)](https://github.com/ali-heidari/RLT-CLI/actions/workflows/ci.yml)
 
@@ -10,9 +10,9 @@ Three commands on a fresh clone, no editing and no data of your own:
 
 ```bash
 cargo build --release
-./target/release/RLT-CLI init      # config, reward script, heuristic, sample data
-./target/release/RLT-CLI train     # no flags: the scaffolded config has them
-./target/release/RLT-CLI eval --dataset ./data/holdout.csv \
+./target/release/rlt init      # config, reward script, heuristic, sample data
+./target/release/rlt train     # no flags: the scaffolded config has them
+./target/release/rlt eval --dataset ./data/holdout.csv \
   --baseline ./scripts/heuristic.py
 ```
 
@@ -40,7 +40,9 @@ full walkthrough.
 
 ## Overview
 
-`RLT-CLI` provides a simple CLI wrapper around AIXKER-RLT concepts for training reinforcement learning models, running inference, and exporting trained artifacts.
+`aixker-rlt-cli` installs the `rlt` command: a wrapper around Aixker-RLT for
+training reinforcement learning policies, evaluating them against the heuristic
+you already run, running inference, and exporting the result.
 
 It supports two Python integration points. In both cases the script is started
 **once** and exchanges one JSON line per request over its stdin/stdout:
@@ -53,12 +55,12 @@ It supports two Python integration points. In both cases the script is started
    from a Python script on demand, for system metrics, sensors, simulations, or
    other dynamic sources.
 
-You supply your own data; no dataset ships with this repository. `RLT-CLI init`
+You supply your own data; no dataset ships with this repository. `rlt init`
 generates a small one so the first run needs nothing from you.
 
 ## CLI workflow
 
-The `RLT-CLI` workflow is:
+The `rlt` workflow is:
 
 ```mermaid
 flowchart TD
@@ -114,7 +116,7 @@ if your toolchain is older.
 cargo build --release
 ```
 
-The binary is produced at `target/release/RLT-CLI`.
+The binary is produced at `target/release/rlt`.
 
 ### Build (Windows)
 
@@ -128,10 +130,10 @@ The binary is produced at `target/release/RLT-CLI`.
 cargo build --release
 ```
 
-The binary is produced at `target\release\RLT-CLI.exe`:
+The binary is produced at `target\release\rlt.exe`:
 
 ```powershell
-.\target\release\RLT-CLI.exe train --dataset .\your-data.csv --model-name my-model.json
+.\target\release\rlt.exe train --dataset .\your-data.csv --model-name my-model.json
 ```
 
 Windows notes:
@@ -156,7 +158,7 @@ sudo apt install mingw-w64        # Debian/Ubuntu
 cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-The binary is produced at `target/x86_64-pc-windows-gnu/release/RLT-CLI.exe`.
+The binary is produced at `target/x86_64-pc-windows-gnu/release/rlt.exe`.
 
 ### Run
 

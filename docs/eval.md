@@ -5,7 +5,7 @@ this model any good?** — and, more usefully, **is it better than the heuristic
 we already run?**
 
 ```bash
-RLT-CLI eval --dataset ./holdout.csv --model-name my-model.json \
+rlt eval --dataset ./holdout.csv --model-name my-model.json \
   --reward-script ./scripts/reward_script.py --baseline static:1
 ```
 
@@ -109,7 +109,7 @@ one per policy.
 `--format json` emits one object, for a CI regression check or a plot:
 
 ```bash
-RLT-CLI eval --dataset ./holdout.csv --model-name my-model.json \
+rlt eval --dataset ./holdout.csv --model-name my-model.json \
   --reward-script ./reward.py --baseline static:1 --format json
 ```
 

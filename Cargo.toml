@@ -1,11 +1,20 @@
 [package]
-name = "RLT-CLI"
+name = "aixker-rlt-cli"
 version = "0.1.0"
 edition = "2021"
+description = "Command-line interface for training, evaluating and serving Aixker-RLT policies"
+license = "Apache-2.0"
+repository = "https://github.com/ali-heidari/RLT-CLI"
 # Set by the dependency tree rather than by this crate: wgpu 28, pulled in by
 # aixker-rlt's GPU backend, requires 1.92. Declaring it turns an obscure
 # dependency-resolution error into a clear "your toolchain is too old".
 rust-version = "1.92"
+
+# The crate is aixker-rlt-cli; the command people type is `rlt`. Cargo also
+# warned that the old uppercase-and-hyphen crate name was non-idiomatic.
+[[bin]]
+name = "rlt"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }

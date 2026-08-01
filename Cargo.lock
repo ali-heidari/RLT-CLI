@@ -3,24 +3,6 @@
 version = 4
 
 [[package]]
-name = "RLT-CLI"
-version = "0.1.0"
-dependencies = [
- "aixker-rlt",
- "assert_cmd",
- "clap",
- "csv",
- "env_logger",
- "log",
- "predicates",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
-]
-
-[[package]]
 name = "addr2line"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -68,6 +50,24 @@ dependencies = [
  "serde_json",
  "tokio",
  "wgpu",
+]
+
+[[package]]
+name = "aixker-rlt-cli"
+version = "0.1.0"
+dependencies = [
+ "aixker-rlt",
+ "assert_cmd",
+ "clap",
+ "csv",
+ "env_logger",
+ "log",
+ "predicates",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

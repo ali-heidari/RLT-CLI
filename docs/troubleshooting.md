@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Errors below are quoted as `RLT-CLI` actually prints them. All errors go to
+Errors below are quoted as `rlt` actually prints them. All errors go to
 stderr and exit with status 1.
 
 ## Configuration

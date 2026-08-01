@@ -1,6 +1,6 @@
 # Data Providers
 
-`RLT-CLI` selects a data provider from the file extension of `--dataset`:
+`rlt` selects a data provider from the file extension of `--dataset`:
 `.py` uses the Python script provider, anything else is read as CSV.
 
 You supply your own data. No dataset ships with this repository.
@@ -28,8 +28,8 @@ of them:
 | `--delimiter CHAR` | `delimiter` | `,` | Field separator; must be a single ASCII character |
 
 ```bash
-RLT-CLI train --dataset ./your-data.csv --model-name my-model.json --has-header
-RLT-CLI train --dataset ./your-data.tsv --model-name my-model.json --delimiter $'\t'
+rlt train --dataset ./your-data.csv --model-name my-model.json --has-header
+rlt train --dataset ./your-data.tsv --model-name my-model.json --delimiter $'\t'
 ```
 
 ### How bad data is handled
@@ -71,7 +71,7 @@ metrics, sensors, or simulations.
 ### Protocol
 
 **The script is started once and kept running for the whole run.** For each
-sample `RLT-CLI` writes one request line to the script's stdin and reads one
+sample `rlt` writes one request line to the script's stdin and reads one
 response line from its stdout.
 
 - **Request:** a JSON object, currently always `{}`. It is an object rather than
@@ -149,7 +149,7 @@ set it to `0` only if you would rather have the CLI wait indefinitely than fail.
 ### Usage
 
 ```bash
-RLT-CLI train --dataset ./scripts/system_metrics.py --model-name my-model.json
+rlt train --dataset ./scripts/system_metrics.py --model-name my-model.json
 ```
 
 ### Sample script

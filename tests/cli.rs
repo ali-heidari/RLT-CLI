@@ -56,7 +56,7 @@ fn workspace(rows: usize) -> TempDir {
 }
 
 fn rlt(dir: &TempDir) -> Command {
-    let mut command = Command::cargo_bin("RLT-CLI").unwrap();
+    let mut command = Command::cargo_bin("rlt").unwrap();
     command.current_dir(dir.path());
     command
 }

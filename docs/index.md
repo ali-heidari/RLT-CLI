@@ -1,6 +1,7 @@
-# RLT-CLI Documentation
+# Aixker-RLT CLI Documentation
 
-This folder contains human-readable documentation for the RLT-CLI project.
+Human-readable documentation for `aixker-rlt-cli`, which installs the `rlt`
+command.
 
 ## Docs
 
