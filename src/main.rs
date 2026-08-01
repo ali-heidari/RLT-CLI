@@ -164,13 +164,40 @@ fn checkpoint_path(model_name: &str) -> PathBuf {
     PathBuf::from(MODELS_DIR).join(format!("{}.{}", model_name, model_name))
 }
 
+/// Render a path as an absolute one wherever possible.
+///
+/// The library keeps checkpoints in a relative `./models`, so the same command
+/// run from two directories reads and writes different files with no hint that
+/// anything differs. Reporting the absolute path is the cheapest way to make
+/// that visible until `--models-dir` is possible.
+///
+/// Falls back to the path as given: a checkpoint that does not exist yet cannot
+/// be canonicalised, and a half-resolved path would be worse than an honest
+/// relative one.
+fn absolute(path: &Path) -> String {
+    if let Ok(resolved) = path.canonicalize() {
+        return resolved.display().to_string();
+    }
+
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => match parent.canonicalize() {
+            Ok(resolved) => resolved.join(name).display().to_string(),
+            Err(_) => path.display().to_string(),
+        },
+        _ => path.display().to_string(),
+    }
+}
+
 /// Check that a checkpoint exists and actually holds a model.
 ///
 /// The library creates the file on load and only fills it when a batch is
 /// saved, so a zero-byte checkpoint is a run that trained nothing.
 fn ensure_checkpoint(checkpoint: &Path, hint: &str) -> Result<(), Box<dyn std::error::Error>> {
     match fs::metadata(checkpoint) {
-        Err(_) => Err(format!("checkpoint not found: {}. {}", checkpoint.display(), hint).into()),
+        // Absolute, because `./models` is relative to the working directory and
+        // "checkpoint not found: ./models/m.json" is unhelpful when the file
+        // exists perfectly well somewhere else.
+        Err(_) => Err(format!("checkpoint not found: {}. {}", absolute(checkpoint), hint).into()),
         // A directory has a non-zero length of its own, so the emptiness check
         // below would wave it through and leave the real complaint to a raw
         // copy or load error much later.
@@ -663,7 +690,7 @@ async fn run_train(
     aixker_rlt::initialize(config.clone());
     aixker_rlt::node::Node::start(
         move |_lowest_state| node_source.lock().unwrap().next_features(),
-        move |features, action, reward| reward_factory.evaluate(features, action, reward),
+        move |features, action, _counter| reward_factory.evaluate(features, action),
         aixker_rlt::RunningMode::Training,
         &config.model_name,
     )
@@ -678,13 +705,13 @@ async fn run_train(
     match fs::metadata(&checkpoint) {
         Ok(metadata) if metadata.len() > 0 => log::info!(
             "checkpoint written to {} ({} bytes)",
-            checkpoint.display(),
+            absolute(&checkpoint),
             metadata.len()
         ),
         _ => log::warn!(
             "no model was saved to {}: the run ended before a full batch completed. \
              Check that the dataset holds enough rows for batch_size and total_batches.",
-            checkpoint.display()
+            absolute(&checkpoint)
         ),
     }
 
@@ -822,7 +849,7 @@ async fn run_infer(
         &checkpoint,
         "Train a model first, or point --model-name at an existing checkpoint.",
     )?;
-    log::info!("loading checkpoint {}", checkpoint.display());
+    log::info!("loading checkpoint {}", absolute(&checkpoint));
 
     let dataset_path = resolved
         .dataset
@@ -1080,7 +1107,7 @@ async fn run_eval(
             // Both policies are scored on this same row. Evaluating them in
             // separate passes would compare two different samples and call the
             // difference a result.
-            let (reward, success) = rewards.evaluate(features, action, 0.0);
+            let (reward, success) = rewards.evaluate(features, action);
             scoring_policy
                 .lock()
                 .unwrap()
@@ -1089,7 +1116,7 @@ async fn run_eval(
             if let Some(baseline) = &baseline {
                 match baseline.action(features) {
                     Ok(baseline_action) => {
-                        let (reward, success) = rewards.evaluate(features, baseline_action, 0.0);
+                        let (reward, success) = rewards.evaluate(features, baseline_action);
                         scoring_baseline
                             .lock()
                             .unwrap()
@@ -1685,6 +1712,28 @@ mod tests {
         // not a script.
         assert!(!is_python_path("notpy"));
         assert!(!is_python_path("data.csv"));
+    }
+
+    #[test]
+    fn paths_are_reported_absolutely() {
+        // `./models` is relative to the working directory, so a relative path
+        // in a message cannot be acted on without knowing where the command ran.
+        let dir = tempfile::TempDir::new().unwrap();
+        let existing = dir.path().join("here.json");
+        std::fs::write(&existing, "{}").unwrap();
+
+        assert!(Path::new(&absolute(&existing)).is_absolute());
+
+        // A checkpoint that does not exist yet still resolves, through its
+        // parent — that is the case the training message needs.
+        let missing = dir.path().join("not-yet.json");
+        let shown = absolute(&missing);
+        assert!(Path::new(&shown).is_absolute(), "{}", shown);
+        assert!(shown.ends_with("not-yet.json"), "{}", shown);
+
+        // Nothing resolvable: report it as given rather than half-resolved.
+        let nowhere = Path::new("./no/such/dir/m.json");
+        assert_eq!(absolute(nowhere), "./no/such/dir/m.json");
     }
 
     #[test]

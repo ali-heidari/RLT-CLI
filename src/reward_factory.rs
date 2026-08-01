@@ -8,7 +8,6 @@
 use crate::providers::python_worker::PythonWorker;
 use crate::stop_signal::StopSignal;
 use serde::{Deserialize, Serialize};
-use std::convert::TryInto;
 use std::error::Error;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -25,7 +24,13 @@ const MAX_CONSECUTIVE_ERRORS: usize = 10;
 #[derive(Serialize)]
 struct RewardRequest {
     features: Vec<f32>,
-    action: u8,
+    /// `u32`, matching the action the library hands us.
+    ///
+    /// This was `u8`: an action that did not fit logged a warning and sent
+    /// action 0 instead, so with `output_number > 255` every reward would have
+    /// been computed for the wrong action. JSON has no opinion about integer
+    /// width, so widening costs nothing and removes the failure.
+    action: u32,
 }
 
 #[derive(Deserialize)]
@@ -69,19 +74,11 @@ impl RewardFactory {
         })
     }
 
-    pub fn evaluate<F, A, R>(&self, features: F, action: A, _prev_reward: R) -> (f32, bool)
+    /// Score one step.
+    pub fn evaluate<F>(&self, features: F, action: u32) -> (f32, bool)
     where
         F: AsRef<[f32]>,
-        A: TryInto<u8>,
-        R: Into<f64>,
-        A::Error: std::fmt::Debug,
     {
-        let action: u8 = action.try_into().unwrap_or_else(|err| {
-            log::warn!("invalid action value {:?}, defaulting to 0", err);
-            0
-        });
-        let _ = _prev_reward.into();
-
         let Some(worker) = &self.worker else {
             return (0.0, true);
         };

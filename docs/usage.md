@@ -85,7 +85,14 @@ instance — and handling the first signal would otherwise leave no way out.
 
 ## Where checkpoints live
 
-Checkpoints are written under `./models/` relative to the working directory.
+Checkpoints are written under `./models/` **relative to the working directory**,
+so the same command run from two directories reads and writes different files.
+Messages naming a checkpoint print the absolute path for that reason:
+
+```text
+INFO  checkpoint written to /home/you/project/models/my-model.json.my-model.json (3150 bytes)
+```
+
 The file name currently repeats the model name — `--model-name my-model.json`
 produces `./models/my-model.json.my-model.json`. That doubling comes from the
 library and is recorded in [found-issues.md](found-issues.md) (issue 1); the CLI

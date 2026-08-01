@@ -19,6 +19,8 @@ reads one response line from its stdout.
 {"features": [0.1, 0.2, 0.3], "action": 1}
 ```
 
+`action` is a whole number in `0..output_number`.
+
 **Response** — one JSON object per line, with both fields required:
 
 ```json
