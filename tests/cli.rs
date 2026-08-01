@@ -514,6 +514,47 @@ fn a_python_provider_serves_many_samples_from_one_interpreter() {
     assert!(dir.path().join(CHECKPOINT).is_file());
 }
 
+/// A provider that answers correctly but chatters on stderr every sample.
+const NOISY_PROVIDER: &str = "import json, sys\n\
+     for line in sys.stdin:\n\
+     \x20   print('noise on stderr', file=sys.stderr, flush=True)\n\
+     \x20   print(json.dumps([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]), flush=True)\n";
+
+#[test]
+fn python_stderr_reaches_the_log() {
+    let dir = workspace(10);
+    fs::write(dir.path().join("noisy.py"), NOISY_PROVIDER).unwrap();
+
+    rlt(&dir)
+        .args(["train", "--dataset", "./noisy.py"])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("noise on stderr"));
+}
+
+#[test]
+fn silent_hides_python_stderr() {
+    // Regression: the script's stderr was inherited, so a traceback or a stray
+    // print(file=sys.stderr) bypassed every log filter the CLI configures —
+    // including --silent, whose contract is zero bytes on both streams.
+    let dir = workspace(10);
+    fs::write(dir.path().join("noisy.py"), NOISY_PROVIDER).unwrap();
+
+    let output = rlt(&dir)
+        .args(["--silent", "train", "--dataset", "./noisy.py"])
+        .timeout(std::time::Duration::from_secs(60))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.stdout.is_empty() && output.stderr.is_empty(),
+        "--silent leaked {} bytes of stdout and {} of stderr",
+        output.stdout.len(),
+        output.stderr.len()
+    );
+}
+
 #[test]
 fn a_python_provider_that_dies_is_reported() {
     let dir = workspace(10);

@@ -109,7 +109,9 @@ not a useful objective.
   of failure for a decision engine, because nothing about it looks wrong.
 
   Any successful answer resets the count, so the ten have to be consecutive.
-- Stderr is inherited, so `print(..., file=sys.stderr)` reaches your terminal.
+- Stderr is forwarded to the log at error level, tagged with the script path, so
+  `print(..., file=sys.stderr)` reaches your terminal and obeys `--log-level`.
+  See [data_providers.md](data_providers.md#failures).
 
 ## Notes
 

@@ -22,7 +22,7 @@
 
 use std::error::Error;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
@@ -56,6 +56,10 @@ impl PythonWorker {
             .stdout
             .take()
             .ok_or_else(|| format!("could not open stdout for '{}'", script_path))?;
+
+        if let Some(stderr) = child.stderr.take() {
+            spawn_stderr_drain(stderr, script_path.to_string());
+        }
 
         log::debug!("started Python worker for {}", script_path);
 
@@ -183,6 +187,26 @@ fn spawn_reader(stdout: ChildStdout) -> Receiver<std::io::Result<String>> {
     receiver
 }
 
+/// Forward the script's stderr to the log facade, one line at a time.
+///
+/// Inheriting the stream let a traceback — or a stray
+/// `print(..., file=sys.stderr)` — bypass every filter the CLI configures,
+/// including `--silent`, whose contract is zero bytes on both streams. Piping
+/// it without reading would deadlock a script that writes more than a pipe
+/// buffer, so the drain gets its own thread and runs for the worker's lifetime.
+fn spawn_stderr_drain(stderr: ChildStderr, script: String) {
+    thread::spawn(move || {
+        for line in BufReader::new(stderr).lines() {
+            match line {
+                Ok(line) => log::error!("{}: {}", script, line),
+                // The pipe closed, or the script emitted something that is not
+                // UTF-8. Either way there is nothing further to forward.
+                Err(_) => break,
+            }
+        }
+    });
+}
+
 /// Start the first interpreter on PATH that exists.
 fn spawn_interpreter(script_path: &str) -> Result<Child, Box<dyn Error>> {
     let mut last_error = None;
@@ -196,9 +220,9 @@ fn spawn_interpreter(script_path: &str) -> Result<Child, Box<dyn Error>> {
             .arg(script_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            // Inherited so tracebacks reach the terminal. Piping stderr without
-            // draining it would deadlock a script that writes a lot to it.
-            .stderr(Stdio::inherit())
+            // Piped and drained by `spawn_stderr_drain`, so the script's
+            // diagnostics obey the CLI's log level like everything else.
+            .stderr(Stdio::piped())
             .spawn();
 
         match result {

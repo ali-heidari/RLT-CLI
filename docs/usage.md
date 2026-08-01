@@ -80,7 +80,10 @@ reports the real path in its messages so you can always find the file.
 - `-v`, `--verbose`
   - Debug-level logging. Overrides `--log-level`.
 - `-q`, `--silent` (alias `--quiet`)
-  - Suppresses **all** CLI output, including the settings block.
+  - Suppresses **all** CLI output, including the settings block, the inference
+    records, and anything a Python script writes to stderr. A run that *fails*
+    still reports why on stderr and exits non-zero — silencing the reason for a
+    failure would be worse than useless.
 - `--errors-only`
   - Only error logs. Overrides `--log-level`.
 - The three convenience flags are mutually exclusive.

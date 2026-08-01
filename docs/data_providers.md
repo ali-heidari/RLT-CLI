@@ -124,7 +124,15 @@ two of them per step when a reward script was also in use. On a measured
   A worker that has missed one deadline is not used again, even if the script
   recovers: a late answer would be paired with the *next* request and quietly
   mismatch every feature vector after it.
-- Stderr is inherited, so tracebacks appear in your terminal as they happen.
+- **Stderr is forwarded to the log** at error level, one line at a time, tagged
+  with the script path:
+
+  ```text
+  ERROR RLT_CLI::providers::python_worker] ./provider.py: ZeroDivisionError: division by zero
+  ```
+
+  So tracebacks appear as they happen, and they obey `--log-level`: `--silent`
+  hides them like any other diagnostic. A run that fails still reports why.
 - A response that is not numeric is an error naming the offending value.
 - Provider failures follow the same skip/count/abort rules as CSV rows above.
 
