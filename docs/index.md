@@ -9,4 +9,7 @@ This folder contains human-readable documentation for the RLT-CLI project.
 - [CLI workflow](cli_workflow.md)
 - [Reward factory](reward_factory.md)
 - [Troubleshooting](troubleshooting.md)
-- [Agent instructions](../copilot-instructions.md)
+- [Roadmap](roadmap.md)
+- [Found issues (upstream library)](found-issues.md)
+- [Code review (bugs, improvements, features)](code-review.md)
+- [Agent instructions](../.agent/agent-instructions.md)

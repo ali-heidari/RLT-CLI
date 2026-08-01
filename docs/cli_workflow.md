@@ -1,66 +1,80 @@
 # CLI Workflow
 
-This document explains the `RLT-CLI` command flow and how the training, inference, and export paths operate.
+How the `train`, `infer`, and `export` paths actually run.
 
-## Workflow Diagram
+## Workflow diagram
 
 ```mermaid
 flowchart TD
-    A[Start CLI] --> B{Command}
-    B --> |train| C[Load config and dataset]
-    B --> |infer| D[Load config and dataset]
-    B --> |export| E[Copy checkpoint file]
-    C --> F{File extension}
-    D --> F
-    F --> |.csv| G[Open CSV data provider]
-    F --> |.py| H[Open Python script data provider]
-    G --> I{Train mode?}
-    H --> I
-    I --> |yes| J{Reward script configured?}
-    I --> |no| K[Infer mode: pass features to model]
-    J --> |yes| L[Validate reward script path]
-    J --> |no| M[Use default reward callback]
-    L --> N[Run Python reward script per sample]
-    N --> O[Supply reward and success to node]
-    M --> O
-    O --> P[Start training node]
-    P --> Q[Training worker processes batches]
-    K --> R[Infer actions from features]
-    R --> S[Print predicted action]
-    E --> T[Export model artifact]
+    A[Start CLI] --> B[Load config file once]
+    B --> C[Resolve settings: flag > file > default]
+    C --> D{Command}
+
+    D --> |train| E[Validate dataset and reward script]
+    E --> F{Dry run?}
+    F --> |yes| G[Print settings and exit]
+    F --> |no| H{Dataset extension}
+    H --> |.csv| I[Open CSV reader]
+    H --> |.py| J[Start Python provider once]
+    I --> K[Validate first row width]
+    J --> K
+    K --> L[Node loop: one feature vector per step]
+    L --> M{Reward script?}
+    M --> |yes| N[Ask the reward worker]
+    M --> |no| O[Default reward 0.0]
+    N --> P[Train batches]
+    O --> P
+    P --> Q{Rows left?}
+    Q --> |yes| L
+    Q --> |no| R[Stop: empty vector ends the loop]
+    R --> S[Report rows read and skipped]
+    S --> T[Warn if no checkpoint was written]
+
+    D --> |infer| U[Require a non-empty checkpoint]
+    U --> V[Read features, emit actions]
+
+    D --> |export| W[Require a non-empty checkpoint]
+    W --> X[Copy the file verbatim]
 ```
 
 ## Training path
 
-1. `cargo run -- train` starts the CLI in training mode.
-2. Configuration values are loaded from the TOML config file and command-line overrides.
-3. The data source is identified by file extension:
-   - `.csv`: Reads comma-separated feature vectors from a text file
-   - `.py`: Calls a Python script to fetch feature vectors on demand
-4. The first row/sample is validated.
-5. If `reward_script` is configured, the path is validated.
-6. The reward factory executes the Python reward script for each sample (if configured) and receives `reward` and `success`.
-7. The training node is started with the configured model name.
-8. A background training worker processes batches and updates the model.
+1. The config file is read **once** into a single structure.
+2. Every setting is resolved as flag > config file > built-in default, and the
+   effective values are printed with their origin.
+3. The dataset and reward script are validated. `--dry-run` stops here, so it
+   fails on a configuration that could not run.
+4. The data provider is chosen by extension: `.py` starts a Python script that
+   stays running for the whole run; anything else is read as CSV.
+5. The first row is read and its width checked against `input_number`. The row
+   is **kept**, not discarded, so no data is lost to validation.
+6. The node loop requests one feature vector per step. Rows that fail to parse
+   are skipped and counted; ten consecutive failures end the run.
+7. If a reward script is configured, each step exchanges one JSON line with the
+   long-lived reward worker.
+8. When the data source is exhausted the boundary returns an empty vector, which
+   is the library's stop signal, and the run ends.
+9. Rows read and skipped are reported. If the run never completed a batch, no
+   checkpoint was written and the CLI says so.
 
 ## Inference path
 
-1. `cargo run -- infer` loads the model for inference.
-2. The data source is identified by file extension:
-   - `.csv`: Reads comma-separated feature vectors from a text file
-   - `.py`: Calls a Python script to fetch feature vectors on demand
-3. Features are fed to the model, which outputs actions based on its learned behavior.
-4. The CLI outputs the predicted action.
+1. The checkpoint must exist and be non-empty; otherwise the command fails
+   rather than running an untrained model with random weights.
+2. Features are read from the same provider types as training.
+3. The model emits an action per sample. The loop sleeps `interval_secs` between
+   samples, which suits polling a live provider but is slow over a file.
 
 ## Export path
 
-1. `cargo run -- export` copies a checkpoint file to the requested output location.
-2. This path is used for packaging trained models or converting artifacts.
+1. The checkpoint defaults to the configured model under `./models/`.
+2. It must exist and be non-empty.
+3. The file is **copied verbatim** — checkpoints are already JSON and no
+   conversion is performed. Output directories are created as needed.
 
 ## Notes
 
-- The data provider type is automatically selected based on the dataset file extension (`.csv` or `.py`).
-- The reward script is optional. If absent, the CLI uses a default reward callback.
-- If the reward script path is invalid, the CLI exits with an error before training starts.
-- If a Python data script fails or produces invalid output, the CLI exits with an error.
-- The `train` path additionally supports `--reward-script` and `reward_script` in `Config.toml`.
+- Provider type is chosen by file extension (`.py`, else CSV).
+- The reward script is optional; without it every reward is `0.0`.
+- A failed export leaves no output file behind.
+- Failures exit with status 1 and a message on stderr.

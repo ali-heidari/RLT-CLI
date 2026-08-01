@@ -1,56 +1,102 @@
 # Reward Factory
 
-`RLT-CLI` now supports user-provided Python reward scripts for training.
+During training `RLT-CLI` can delegate reward computation to a Python script of
+your own, so the objective is defined where your domain knowledge lives.
 
-## How it works
+Without a reward script the CLI returns a reward of `0.0` and `success: true`
+for every step, which trains nothing useful — a reward script is what makes
+training meaningful.
 
-During training, the CLI can invoke a Python script to compute reward and success values for each experience. The Rust reward factory sends a JSON request to the script on stdin and expects a JSON response on stdout.
+## Protocol
 
-### Request format
+**The script is started once and kept running for the whole run.** For each
+environment step `RLT-CLI` writes one request line to the script's stdin and
+reads one response line from its stdout.
 
-The Python script receives an object like:
-
-```json
-{
-  "features": [0.1, 0.2, 0.3],
-  "action": 1
-}
-```
-
-### Response format
-
-The script must print a JSON object containing `reward` and `success`:
+**Request** — one JSON object per line:
 
 ```json
-{
-  "reward": 0.5,
-  "success": true
-}
+{"features": [0.1, 0.2, 0.3], "action": 1}
 ```
 
-## CLI usage
+**Response** — one JSON object per line, with both fields required:
 
-Use `--reward-script` with the `train` subcommand:
+```json
+{"reward": 0.5, "success": true}
+```
+
+`reward` is a number, `success` a boolean.
+
+## Minimal script
+
+```python
+#!/usr/bin/env python3
+import json
+import sys
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+
+    request = json.loads(line)
+    reward, success = evaluate(request["features"], request["action"])
+    print(json.dumps({"reward": reward, "success": success}), flush=True)
+```
+
+> **Breaking change.** Earlier versions ran `python3 script.py` once per reward,
+> so `request = json.load(sys.stdin)` was correct. That form now **hangs**,
+> because `json.load` waits for end-of-input while the CLI holds the pipe open
+> waiting for a response. Convert the script to the loop shown above.
+
+The interpreter is started with `-u` (unbuffered), so a missing `flush=True`
+will not stall the run. Keeping `flush=True` is still good practice.
+
+## Why it changed
+
+Starting an interpreter per reward cost 20–50 ms per environment step. On a
+measured 416-sample run using both a data provider and a reward script, moving
+both to long-lived workers took the run from **26.24 s to 0.20 s**.
+
+## Usage
 
 ```bash
-cargo run -- train --dataset ./data/train.csv --model-name my-model.json --reward-script ./reward_script.py
+RLT-CLI train --dataset ./your-data.csv --model-name my-model.json \
+  --reward-script ./scripts/reward_script.py
 ```
 
-You can also set `reward_script` in `Config.toml`:
+Or in the config file:
 
 ```toml
-reward_script = "./reward_script.py"
+reward_script = "./scripts/reward_script.py"
 ```
+
+The flag takes precedence over the config file. The path is validated before
+training starts, including under `--dry-run`.
 
 ## Sample script
 
-A sample script is included as `reward_script.py` in the repository root.
+[`scripts/reward_script.py`](../scripts/reward_script.py) implements a simple
+rule: reward is positive when the chosen action matches a heuristic on the first
+feature, and `success` mirrors the sign of the reward. It is a starting point,
+not a useful objective.
 
-The script demonstrates a simple reward rule:
-- reward is positive when the selected action matches a heuristic condition
-- `success` is `true` when reward is positive
+## Failures
+
+- **A script that will not start** fails the run immediately, with its stderr
+  shown.
+- **A script that dies mid-run** is reported with its exit status rather than
+  hanging the CLI.
+- **Invalid JSON, or a missing field**, is logged at error level and that step
+  falls back to `(0.0, false)`; the run continues. Watch for repeated
+  `reward script failed:` lines — they mean the objective is not being applied.
+- Stderr is inherited, so `print(..., file=sys.stderr)` reaches your terminal.
 
 ## Notes
 
-- Python must be installed on the machine as `python3` or `python`.
-- If the reward script fails or returns invalid JSON, the CLI falls back to a default reward of `0.0` and `success: false`.
+- Python must be on `PATH` as `python3` or `python`.
+- The script may hold state between steps in ordinary local variables, since the
+  process is no longer restarted per call.
+- Scripts are executed as given. Only point `--reward-script` at a script you
+  trust, particularly when the path comes from a config file rather than the
+  command line.

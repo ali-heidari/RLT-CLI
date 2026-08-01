@@ -1,222 +1,194 @@
 # Troubleshooting
 
-This document covers common errors and issues you might encounter when using RLT-CLI, along with solutions and workarounds.
+Errors below are quoted as `RLT-CLI` actually prints them. All errors go to
+stderr and exit with status 1.
 
-## Configuration Errors
+## Configuration
 
-### Invalid Configuration File
+### `config file not found: ./my-config.toml`
 
-**Error:** `Error: Failed to load config: invalid TOML syntax`
+A file passed with `--config` does not exist. Check the path, remembering that
+relative paths resolve from the current working directory.
 
-**Cause:** The configuration file contains invalid TOML syntax.
+A missing default `Config.toml` is **not** an error — the CLI then reports
+`No config file found; using built-in defaults.` and runs with the defaults
+listed in [usage.md](usage.md).
 
-**Solution:**
-- Validate your TOML file using an online TOML validator
-- Check for missing quotes, incorrect indentation, or invalid characters
-- Ensure all required fields are present and correctly typed
+### `failed to parse config file 'Config.toml': TOML parse error at line 1, column 14`
 
-### Missing Configuration File
+The message includes the offending line, column, and expected type:
 
-**Error:** `Error: Config file not found: Config.toml`
+```text
+Error: failed to parse config file './Config.toml': TOML parse error at line 1, column 14
+  |
+1 | batch_size = "not a number"
+  |              ^^^^^^^^^^^^^^
+invalid type: string "not a number", expected u32
+```
 
-**Cause:** The specified config file doesn't exist or the path is incorrect.
+Fix the value's type. Unknown keys are ignored rather than rejected, so a typo'd
+key name silently does nothing — check spelling against the table in
+[usage.md](usage.md) if a setting seems to have no effect.
 
-**Solution:**
-- Verify the file path is correct
-- Create a sample config file if it doesn't exist
-- Use absolute paths or ensure relative paths are from the current working directory
+### A config file value seems to be ignored
 
-## Dataset Errors
+Command-line flags win over the config file. The settings block names the origin
+of every value:
 
-### Dataset File Not Found
+```text
+  batch size: 99 (flag)          <- a flag overrode the file
+  batch size: 8 (Config.toml)    <- the file was used
+  batch size: 32 (default)       <- neither set it
+```
 
-**Error:** `Error: Dataset file not found: ./data/train.csv`
+`mode` in the config file is ignored by design: the subcommand decides whether
+the run trains or infers.
 
-**Cause:** The CSV dataset file specified in config or arguments doesn't exist.
+### `dataset must be set in the config file or via --dataset`
 
-**Solution:**
-- Check the file path in your config or command-line arguments
-- Ensure the file exists and has read permissions
-- Use absolute paths if relative paths are causing issues
+Neither `--dataset` nor a `dataset` key was provided. Same for
+`model_name must be set ...`.
 
-### Invalid CSV Format
+## Datasets
 
-**Error:** `Error: Failed to parse CSV row: expected 8 features, got 5`
+### `dataset not found: ./data.csv`
 
-**Cause:** The CSV file doesn't match the expected format (8 features per row).
+The path does not exist or is not a file. This is checked before training, and
+also under `--dry-run`.
 
-**Solution:**
-- Verify your CSV has exactly 8 numeric columns
-- Check for missing values or extra commas
-- Ensure no header row if not expected, or remove it if present
+### `feature width mismatch at row 1: input_number is 12 but the row has 6 value(s)`
 
-### Shape Incompatibility Error
+`input_number` does not match your data. Set it to the number of columns your
+rows actually have — the message tells you which value to use. A mismatch found
+mid-file names the offending row and stops the run.
 
-**Error:** `called \`Result::unwrap()\` on an \`Err\` value: ShapeError/IncompatibleShape: incompatible shapes`
+### `failed to read the first row: line 1, column 1: 'cpu' is not a number`
 
-**Cause:** The number of columns in your datasource CSV doesn't match the `input_number` specified in the configuration.
+The first line is a header. Pass `--has-header` (or set `has_header = true`) to
+skip it.
 
-**Solution:**
-- Ensure your CSV file has exactly the same number of columns as the `input_number` value in your config file
-- Check that `input_number` in `Config.toml` matches your dataset's feature count
-- Verify there are no extra columns, missing columns, or header rows in the CSV
+The first row is validated up front, so an unreadable first line is fatal while
+later bad rows are merely skipped. That asymmetry is deliberate: a bad first row
+usually means the whole file is being read wrongly.
 
-### Empty Dataset
+### `line 42, column 3: 'n/a' is not a number` / `line 42, column 3: empty field`
 
-**Error:** `Error: Dataset is empty`
+A field is not numeric, or is blank. The row is skipped and counted; the run
+continues and reports `read 1841 row(s) from the data source, skipped 3` at the
+end.
 
-**Cause:** The CSV file contains no data rows.
+Values are never silently replaced with `0.0`. If your data legitimately
+contains blanks or sentinels, preprocess them before training — an imputed value
+is a modelling decision the CLI will not make for you.
 
-**Solution:**
-- Add data rows to your CSV file
-- Check if the file is truncated or corrupted
-- Verify the correct file is being loaded
+### `data source failed 10 times in a row, last error: ...`
 
-## Model Errors
+Ten consecutive failures end the run, on the basis that the source is broken
+rather than imperfect. Check the preceding `skipping row` warnings for the
+pattern.
 
-### Model Directory Not Writable
+### `data source produced no rows`
 
-**Error:** `Error: Failed to create model directory: Permission denied`
+The file is empty, or every line is blank.
 
-**Cause:** The application doesn't have write permissions to create the models directory.
+### Non-numeric columns (ids, timestamps, categories)
 
-**Solution:**
-- Run the application with appropriate permissions
-- Change the model path to a writable location
-- Create the directory manually: `mkdir -p models/`
+There is no column selection yet, so every column must be numeric. Preprocess
+identifier, timestamp, and categorical columns into numbers first, or drop them.
+Tracked in [roadmap.md](roadmap.md) (§3, dataset handling).
 
-### Model File Corruption
+## Python scripts
 
-**Error:** `Error: Failed to load model: invalid JSON format`
+### The run hangs and nothing happens
 
-**Cause:** The model checkpoint file is corrupted or not a valid JSON.
+Almost certainly an old-style reward script using `json.load(sys.stdin)`, which
+waits for end-of-input while the CLI waits for a response.
 
-**Solution:**
-- Delete the corrupted checkpoint and restart training
-- Check file permissions and disk space
-- Ensure no other processes are modifying the file simultaneously
+Scripts are now started **once** and must loop:
 
-### Feature Dimension Mismatch
+```python
+for line in sys.stdin:
+    request = json.loads(line)
+    print(json.dumps(response), flush=True)
+```
 
-**Error:** `Error: Feature dimension mismatch: expected 8, got 6`
+See [reward_factory.md](reward_factory.md) and
+[data_providers.md](data_providers.md).
 
-**Cause:** The input features don't match the model's expected input size.
+### `Python script './provider.py' exited (exit status: 0): failed to send a request: Broken pipe`
 
-**Solution:**
-- Verify your dataset has exactly 8 features per row
-- Check the `input_number` in your config matches your data
-- Ensure consistent feature extraction across training and inference
+The script printed one line and exited — the old single-shot style. Wrap its
+body in the stdin loop above.
 
-## Training Errors
+### `Python script './provider.py': the script closed its output without answering`
 
-### Buffer Underflow
+The script died, usually at startup. Its stderr is inherited, so the traceback
+appears in your terminal just above this message.
 
-**Error:** `Warning: Buffer underflow - not enough experiences for batch`
+### `no Python interpreter found on PATH (tried python3, python)`
 
-**Cause:** Training started before sufficient experiences were collected.
+Install Python, or make it available on `PATH`. On Windows, tick *"Add python.exe
+to PATH"* in the installer.
 
-**Solution:**
-- Increase the initial data collection period
-- Reduce batch size or increase buffer capacity
-- Wait for more experiences before starting training
+### `reward script failed: invalid JSON reward response '...'`
 
-### Diverging Loss
+The script printed something other than `{"reward": <number>, "success": <bool>}`.
+That step falls back to `(0.0, false)` and the run continues — repeated
+occurrences mean your objective is not being applied at all. Check for stray
+`print()` calls writing to stdout; diagnostics belong on stderr.
 
-**Error:** `Warning: Training diverging - loss increasing`
+## Models and checkpoints
 
-**Cause:** The model is not learning and loss is getting worse.
+### `checkpoint not found: ./models/m.json.m.json`
 
-**Solution:**
-- Reduce learning rate
-- Check reward calculation logic
-- Verify feature normalization
-- Restart training with different hyperparameters
+Nothing has been trained under that name yet, or `--model-name` is misspelled.
 
-### Memory Issues
+The doubled file name is expected: the library builds it from the model name
+twice (see [found-issues.md](found-issues.md), issue 1). The CLI always reports
+the real path.
 
-**Error:** `Error: Out of memory`
+### `checkpoint is empty: ./models/m.json.m.json. The model was never saved`
 
-**Cause:** Large datasets or models exceeding available RAM.
+Training ran but never completed a batch, so no weights were written. You will
+have seen this warning during training:
 
-**Solution:**
-- Use streaming dataset loading (iterator-based)
-- Reduce batch size or model size
-- Increase system memory or use a machine with more RAM
+```text
+WARN no model was saved to ./models/m.json.m.json: the run ended before a full
+     batch completed. Check that the dataset holds enough rows for batch_size
+     and total_batches.
+```
 
-## Runtime Errors
+The dataset needs enough rows to fill at least one batch. Reduce `batch_size`,
+or use more data.
 
-### Tokio Runtime Issues
+### Inference returns implausible actions
 
-**Error:** `Error: Cannot start a runtime from within a runtime`
+Confirm the checkpoint is the one you trained: the CLI logs
+`loading checkpoint ./models/...` at info level. A missing or empty checkpoint is
+now rejected rather than being replaced with random weights, so this should no
+longer happen silently.
 
-**Cause:** Attempting to start a Tokio runtime inside an existing one.
+## Performance
 
-**Solution:**
-- Ensure the application is the entry point for the runtime
-- Check for nested async calls or library conflicts
+### Inference is extremely slow
 
-### Serialization Errors
+`infer` sleeps `interval_secs` (default `10`) between samples, because it is
+built for polling a live provider. Over a file that is 10 seconds per row. Set
+`interval_secs = 0` in the config file for batch inference.
 
-**Error:** `Error: Failed to serialize model: serde error`
+### Training with Python scripts is slow
 
-**Cause:** Model weights contain invalid values (NaN, infinity).
+It should not be: interpreters are started once and kept alive, worth roughly
+130× on a run using both a provider and a reward script. If a run is still slow,
+the cost is inside your script — `scripts/system_metrics.py`, for instance,
+sleeps 0.1 s per sample to measure CPU usage.
 
-**Solution:**
-- Check for numerical instabilities in training
-- Add gradient clipping
-- Validate input data for extreme values
+### Training is CPU-bound
 
-## Command-Line Errors
+Try `--backend gpu`, a smaller `hidden_layers`, or a larger `batch_size`.
 
-### Unknown Subcommand
+## Getting help
 
-**Error:** `error: Found argument 'invalid' which wasn't expected`
-
-**Cause:** Invalid subcommand or flag used.
-
-**Solution:**
-- Use `cargo run -- --help` to see available commands
-- Check command syntax: `train`, `infer`, `export`
-- Verify flag names and formats
-
-### Missing Required Arguments
-
-**Error:** `error: the following required arguments were not provided: --dataset`
-
-**Cause:** Required arguments not specified.
-
-**Solution:**
-- Provide all required arguments or use a config file
-- Use `--help` with the subcommand for details
-
-## Performance Issues
-
-### Slow Training
-
-**Cause:** Various factors can slow down training.
-
-**Solutions:**
-- Use GPU acceleration if available
-- Optimize batch size (typically 32-128)
-- Reduce model complexity (fewer hidden layers)
-- Use faster storage for checkpoints
-
-### High CPU Usage
-
-**Cause:** Inefficient data loading or processing.
-
-**Solutions:**
-- Use streaming iterators for large datasets
-- Optimize feature preprocessing
-- Reduce logging frequency
-- Profile the application for bottlenecks
-
-## Getting Help
-
-If you encounter an error not covered here:
-
-1. Check the application logs for more detailed error messages
-2. Verify your Rust and Cargo versions are up to date
-3. Ensure all dependencies are correctly installed
-4. Search existing issues or create a new one with full error details
-5. Include your config file, command used, and system information when reporting issues
+Re-run with `-v` for debug-level logging, which includes per-sample detail.
+When reporting a problem, include the settings block from the start of the run —
+it shows every effective value and where it came from.

@@ -1,77 +1,139 @@
 # Data Providers
 
-`RLT-CLI` supports multiple data sources for training. The data provider type is determined by the file extension of the `--dataset` argument.
+`RLT-CLI` selects a data provider from the file extension of `--dataset`:
+`.py` uses the Python script provider, anything else is read as CSV.
+
+You supply your own data. No dataset ships with this repository.
 
 ## CSV Data Provider
 
-The CSV provider reads comma-separated feature vectors from a text file, one per line.
+Reads one feature vector per line. Parsing uses the `csv` crate, so quoted
+fields, embedded delimiters and escapes are handled correctly.
 
 ### Format
 
-Each line contains comma-separated floats:
+Every field must be a number, and every row must hold exactly `input_number`
+of them:
 
-```
-0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8
-0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85
-...
+```csv
+0.1,0.2,0.3,0.4,0.5,0.6
+0.15,0.25,0.35,0.45,0.55,0.65
 ```
 
-### Usage
+### Options
+
+| Flag | Config key | Default | Meaning |
+| --- | --- | --- | --- |
+| `--has-header [true\|false]` | `has_header` | `false` | Skip the first row instead of parsing it as data |
+| `--delimiter CHAR` | `delimiter` | `,` | Field separator; must be a single ASCII character |
 
 ```bash
-cargo run -- train --dataset ./data/train.csv --model-name my-model.json
+RLT-CLI train --dataset ./your-data.csv --model-name my-model.json --has-header
+RLT-CLI train --dataset ./your-data.tsv --model-name my-model.json --delimiter $'\t'
 ```
+
+### How bad data is handled
+
+Values are never silently substituted. A field that is not a number, and an
+empty field, are both errors naming the line and column:
+
+```text
+skipping row 41: line 42, column 3: 'n/a' is not a number
+skipping row 58: line 59, column 5: empty field
+```
+
+- **A bad row is skipped**, counted, and reported at the end
+  (`read 1841 row(s) from the data source, skipped 3`). One bad line does not
+  end a long run.
+- **Ten consecutive failures end the run**, on the basis that the source is
+  broken rather than merely imperfect.
+- **The first row must be valid.** It is checked before training starts, so a
+  file whose first line is a header (or otherwise unreadable) fails immediately
+  rather than after an hour.
+- **Every row must have `input_number` fields.** A mismatch stops the run and
+  names the offending row.
+
+An empty field is an error rather than `0.0` on purpose: a missing measurement
+is not a measurement of zero, and treating it as one trains the model on data
+that was never observed.
+
+### Columns must all be numeric
+
+There is no column selection yet. A CSV containing identifiers, timestamps or
+categorical text must be preprocessed into numeric columns before training.
+Column selection is tracked in [roadmap.md](roadmap.md) (§3, dataset handling).
 
 ## Python Script Data Provider
 
-The Python script provider calls a Python script to fetch feature vectors on demand. This is useful for dynamic data sources like system metrics, real-time sensors, or simulations.
+Fetches feature vectors from a Python script on demand — useful for live system
+metrics, sensors, or simulations.
 
-### How it works
+### Protocol
 
-1. RLT-CLI runs the Python script each time new features are needed.
-2. The script outputs feature data on stdout.
-3. The output is parsed as either JSON array or comma-separated floats.
-4. If parsing fails, training stops.
+**The script is started once and kept running for the whole run.** For each
+sample `RLT-CLI` writes one request line to the script's stdin and reads one
+response line from its stdout.
 
-### Output format
+- **Request:** a JSON object, currently always `{}`. It is an object rather than
+  a bare newline so fields can be added later without breaking existing scripts;
+  ignore its contents.
+- **Response:** one line holding either a JSON array of numbers or
+  comma-separated floats.
 
-The Python script should output either:
+```python
+#!/usr/bin/env python3
+import json
+import sys
 
-**JSON array:**
-```json
-[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+for _request in sys.stdin:
+    print(json.dumps(collect_features()), flush=True)
 ```
 
-**Comma-separated floats:**
-```
-0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8
-```
+> **Breaking change.** Earlier versions ran `python3 script.py` once per sample,
+> so a script that printed one line and exited was correct. Such a script now
+> fails after its first sample with `exited (exit status: 0): failed to send a
+> request: Broken pipe`. Wrap the body in `for _request in sys.stdin:` as above.
+
+The interpreter is started with `-u` (unbuffered), so a missing `flush=True`
+will not stall the run. Keeping `flush=True` is still good practice.
+
+### Why it changed
+
+Starting an interpreter per sample cost 20–50 ms of pure overhead per step, and
+two of them per step when a reward script was also in use. On a measured
+416-sample run with both a provider and a reward script:
+
+| | wall time |
+| --- | --- |
+| interpreter per sample | 26.24 s |
+| one interpreter, kept alive | 0.20 s |
+
+### Failures
+
+- If the script exits, the CLI reports the exit status and the last error rather
+  than hanging.
+- Stderr is inherited, so tracebacks appear in your terminal as they happen.
+- A response that is not numeric is an error naming the offending value.
+- Provider failures follow the same skip/count/abort rules as CSV rows above.
 
 ### Usage
 
 ```bash
-cargo run -- train --dataset ./system_metrics.py --model-name my-model.json
+RLT-CLI train --dataset ./scripts/system_metrics.py --model-name my-model.json
 ```
 
 ### Sample script
 
-A sample Python script is included as `system_metrics.py` that outputs system metrics:
-- CPU usage percentage
-- Memory usage percentage
-- Disk usage percentage
-- Load averages (1, 5, 15 minute)
-- Number of processes
-- Uptime in days
+[`scripts/system_metrics.py`](../scripts/system_metrics.py) reports twelve
+normalised metrics read from `/proc` and `shutil.disk_usage` — CPU, memory,
+load, process count, uptime and derived values. It needs no third-party
+packages, and it is Linux-specific because it reads `/proc` directly.
 
-The script requires `psutil` for full functionality. Install it with:
-
-```bash
-pip install psutil
-```
+Set `input_number = 12` to use it.
 
 ### Notes
 
-- Python must be installed as `python3` or `python`.
-- If the script fails or produces invalid output, training stops.
-- The script is called in a subprocess with no stdin. Ensure the script is self-contained.
-- For data providers that require state, maintain state in the script using file-based persistence or in-memory state.
+- Python must be on `PATH` as `python3` or `python`.
+- The script may keep state between samples in ordinary local variables, since
+  the process is no longer restarted.
+- Scripts are executed as given. Only point `--dataset` at a script you trust.
