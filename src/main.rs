@@ -643,58 +643,33 @@ async fn run_train(
         resolved.script_timeout,
     )?;
 
-    let is_python_script = is_python_path(&dataset_path);
-
     let config = Arc::new(config);
     let input_number = config.input_number;
 
-    if is_python_script {
-        log::info!("using Python script data provider from {}", dataset_path);
-        let provider = open_python_script(&dataset_path, resolved.script_timeout)?;
+    let provider = open_provider(
+        &dataset_path,
+        resolved.csv_has_header,
+        resolved.csv_delimiter,
+        resolved.script_timeout,
+    )?;
 
-        let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
-        let width = source.validate_first()?;
-        log::info!("first sample loaded with {} feature(s)", width);
+    let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
+    let width = source.validate_first()?;
+    log::info!("first row loaded with {} value(s)", width);
 
-        let source = Arc::new(Mutex::new(source));
-        let node_source = source.clone();
+    let source = Arc::new(Mutex::new(source));
+    let node_source = source.clone();
 
-        aixker_rlt::initialize(config.clone());
-        aixker_rlt::node::Node::start(
-            move |_lowest_state| node_source.lock().unwrap().next_features(),
-            move |features, action, reward| reward_factory.evaluate(features, action, reward),
-            aixker_rlt::RunningMode::Training,
-            &config.model_name,
-        )
-        .await;
+    aixker_rlt::initialize(config.clone());
+    aixker_rlt::node::Node::start(
+        move |_lowest_state| node_source.lock().unwrap().next_features(),
+        move |features, action, reward| reward_factory.evaluate(features, action, reward),
+        aixker_rlt::RunningMode::Training,
+        &config.model_name,
+    )
+    .await;
 
-        report_source(&source)?;
-    } else {
-        let options = CsvOptions {
-            has_header: resolved.csv_has_header,
-            delimiter: delimiter_byte(resolved.csv_delimiter)?,
-        };
-        let dataset = open_csv_dataset(&dataset_path, options)?;
-        log::info!("opened CSV dataset stream from {}", dataset_path);
-
-        let mut source = FeatureSource::new(dataset, input_number).with_stop_signal(stop.clone());
-        let width = source.validate_first()?;
-        log::info!("first CSV row loaded with {} field(s)", width);
-
-        let source = Arc::new(Mutex::new(source));
-        let node_source = source.clone();
-
-        aixker_rlt::initialize(config.clone());
-        aixker_rlt::node::Node::start(
-            move |_lowest_state| node_source.lock().unwrap().next_features(),
-            move |features, action, reward| reward_factory.evaluate(features, action, reward),
-            aixker_rlt::RunningMode::Training,
-            &config.model_name,
-        )
-        .await;
-
-        report_source(&source)?;
-    }
+    report_source(&source)?;
 
     // A run that never completed a batch leaves the checkpoint empty. Exiting
     // zero without saying so is how "training worked" turns into "inference
@@ -715,6 +690,36 @@ async fn run_train(
 
     log::info!("training finished");
     Ok(())
+}
+
+/// Open the data provider a dataset path selects.
+///
+/// Boxed so the `.py` and CSV cases collapse into one code path. `train` and
+/// `infer` each used to carry both, four nearly identical blocks in total, and
+/// they had already drifted: one logged its actions, the other discarded them.
+///
+/// `+ Send` is load-bearing — the boxed iterator ends up inside an
+/// `Arc<Mutex<..>>` shared with the node loop, which is not `Sync` without it.
+///
+/// The delimiter is converted inside the CSV case only, so a non-ASCII
+/// delimiter alongside a Python provider stays the harmless irrelevance it is.
+fn open_provider(
+    dataset: &str,
+    has_header: bool,
+    delimiter: char,
+    timeout: Option<std::time::Duration>,
+) -> Result<Box<dyn Iterator<Item = Row> + Send>, Box<dyn std::error::Error>> {
+    if is_python_path(dataset) {
+        log::info!("using Python script data provider from {}", dataset);
+        Ok(Box::new(open_python_script(dataset, timeout)?))
+    } else {
+        log::info!("using CSV data provider from {}", dataset);
+        let options = CsvOptions {
+            has_header,
+            delimiter: delimiter_byte(delimiter)?,
+        };
+        Ok(Box::new(open_csv_dataset(dataset, options)?))
+    }
 }
 
 /// Turn Ctrl-C into a clean end-of-data rather than a killed process.
@@ -836,8 +841,6 @@ async fn run_infer(
 
     let config = Arc::new(config);
 
-    let is_python_script = is_python_path(&dataset_path);
-
     aixker_rlt::initialize(config.clone());
 
     let input_number = config.input_number;
@@ -847,51 +850,29 @@ async fn run_infer(
     let stop = StopSignal::new();
     stop_on_interrupt(stop.clone());
 
-    if is_python_script {
-        log::info!("using Python script data provider from {}", dataset_path);
-        let provider = open_python_script(&dataset_path, resolved.script_timeout)?;
+    let provider = open_provider(
+        &dataset_path,
+        resolved.csv_has_header,
+        resolved.csv_delimiter,
+        resolved.script_timeout,
+    )?;
 
-        let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
-        let width = source.validate_first()?;
-        log::info!("first sample loaded with {} feature(s)", width);
+    let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
+    let width = source.validate_first()?;
+    log::info!("first row loaded with {} value(s)", width);
 
-        let source = Arc::new(Mutex::new(source));
-        let node_source = source.clone();
+    let source = Arc::new(Mutex::new(source));
+    let node_source = source.clone();
 
-        aixker_rlt::node::Node::start(
-            move |_lowest_state| node_source.lock().unwrap().next_features(),
-            action_recorder(source.clone(), actions.clone()),
-            aixker_rlt::RunningMode::Infer,
-            &config.model_name,
-        )
-        .await;
+    aixker_rlt::node::Node::start(
+        move |_lowest_state| node_source.lock().unwrap().next_features(),
+        action_recorder(source.clone(), actions.clone()),
+        aixker_rlt::RunningMode::Infer,
+        &config.model_name,
+    )
+    .await;
 
-        report_source(&source)?;
-    } else {
-        log::info!("using CSV data provider from {}", dataset_path);
-        let options = CsvOptions {
-            has_header: resolved.csv_has_header,
-            delimiter: delimiter_byte(resolved.csv_delimiter)?,
-        };
-        let provider = open_csv_dataset(&dataset_path, options)?;
-
-        let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
-        let width = source.validate_first()?;
-        log::info!("first CSV row loaded with {} field(s)", width);
-
-        let source = Arc::new(Mutex::new(source));
-        let node_source = source.clone();
-
-        aixker_rlt::node::Node::start(
-            move |_lowest_state| node_source.lock().unwrap().next_features(),
-            action_recorder(source.clone(), actions.clone()),
-            aixker_rlt::RunningMode::Infer,
-            &config.model_name,
-        )
-        .await;
-
-        report_source(&source)?;
-    }
+    report_source(&source)?;
 
     // A destination that could not be written is a failed run: the decisions
     // are the result of the command.
@@ -1074,20 +1055,12 @@ async fn run_eval(
     let config = Arc::new(config);
     let input_number = config.input_number;
 
-    // `+ Send` matters: without it the boxed iterator makes the shared
-    // `FeatureSource` neither Send nor Sync, which the concrete provider types
-    // in `run_train` and `run_infer` are.
-    let provider: Box<dyn Iterator<Item = Row> + Send> = if is_python_path(&dataset_path) {
-        Box::new(open_python_script(&dataset_path, resolved.script_timeout)?)
-    } else {
-        Box::new(open_csv_dataset(
-            &dataset_path,
-            CsvOptions {
-                has_header: resolved.csv_has_header,
-                delimiter: delimiter_byte(resolved.csv_delimiter)?,
-            },
-        )?)
-    };
+    let provider = open_provider(
+        &dataset_path,
+        resolved.csv_has_header,
+        resolved.csv_delimiter,
+        resolved.script_timeout,
+    )?;
 
     let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
     let width = source.validate_first()?;
