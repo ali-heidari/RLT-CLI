@@ -8,6 +8,11 @@ rlt init
 rlt train
 ```
 
+The scaffolded config names `scripts/reward.py`, so `train` asks before running
+it — scripts named by a config file rather than typed on the command line need
+confirming. Answer `y`, or pass `--allow-scripts` to skip the prompt and for any
+run without a terminal. See [usage.md](usage.md#script-trust).
+
 ## What it writes
 
 | File | Purpose |

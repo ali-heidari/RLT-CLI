@@ -11,10 +11,14 @@ Three commands on a fresh clone, no editing and no data of your own:
 ```bash
 cargo build --release
 ./target/release/rlt init      # config, reward script, heuristic, sample data
-./target/release/rlt train     # no flags: the scaffolded config has them
+./target/release/rlt train     # asks before running the scaffolded reward script
 ./target/release/rlt eval --dataset ./data/holdout.csv \
   --baseline ./scripts/heuristic.py
 ```
+
+`train` confirms before executing a script that the **config file** names rather
+than one you typed — add `--allow-scripts` to answer in advance, or when there
+is no terminal. See [Script trust](docs/usage.md#script-trust).
 
 The last command is the one that matters — it scores the trained policy against
 a plain threshold rule and tells you which won:

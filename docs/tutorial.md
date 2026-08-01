@@ -209,8 +209,20 @@ dry and the run ends early.
 rlt train
 ```
 
-No flags — the config has them. The settings block prints where every value came
-from, so there is no guessing:
+No flags — the config has them. Because the config *names a script* rather than
+you typing its path, `rlt` asks before running it:
+
+```text
+Config.toml asks to execute:
+  ./reward.py
+These run as you, with your privileges.
+Run them? [y/N] y
+```
+
+Answer `y`, or pass `--allow-scripts` to answer in advance — which you will need
+in CI, where there is no terminal to ask.
+
+The settings block prints where every value came from, so there is no guessing:
 
 ```text
 Starting training with the following settings:

@@ -35,17 +35,33 @@ The interesting surface is small. Worth reporting:
 
 **`rlt` executes the Python scripts it is pointed at.** `--dataset provider.py`,
 `--reward-script reward.py` and `--baseline heuristic.py` all start an
-interpreter and run the file. That is the feature. Treat those paths exactly as
-you would treat any other executable:
+interpreter and run the file. That is the feature — but where the path came
+from decides whether you are asked first.
 
-> **Only point them at scripts you trust**, and be aware that a `Config.toml`
-> in the working directory can supply those paths **without appearing on the
-> command line**. Read a config file before running a command in a directory
-> you did not set up.
+**A path you typed is an informed choice** and runs without ceremony.
 
-A confirmation or checksum pin for script paths that come from a config file
-rather than an explicit flag is on the roadmap (§4). Until it exists, running
-`rlt` in an untrusted directory is equivalent to running an untrusted script.
+**A path named only by a config file is not.** Someone who clones a repository
+and runs `rlt train` in it has asked to train a model, not to execute whatever
+that directory nominates. So when a script path comes from `Config.toml` rather
+than the command line:
+
+- With a terminal, `rlt` lists the scripts and asks before running them:
+
+  ```text
+  Config.toml asks to execute:
+    ./scripts/reward.py
+  These run as you, with your privileges.
+  Run them? [y/N]
+  ```
+
+- Without one — CI, a pipeline, a cron job — it refuses and exits non-zero,
+  naming the scripts. Pass `--allow-scripts` to answer in advance.
+
+Only `.py` paths are gated. A CSV dataset is read, not executed.
+
+This narrows the exposure rather than removing it: `--allow-scripts` is a real
+decision, and a script you approved once can be edited afterwards. A checksum
+pin would close that gap and is not built.
 
 Also by design, and so not vulnerabilities:
 

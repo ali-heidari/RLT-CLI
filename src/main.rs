@@ -20,6 +20,7 @@ use providers::python_script::open_python_script;
 use reward_factory::RewardFactory;
 use serde::Deserialize;
 use std::fs;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use stop_signal::StopSignal;
@@ -256,7 +257,30 @@ struct Resolved {
     csv_delimiter: char,
     /// How long a Python script may take to answer. `None` waits forever.
     script_timeout: Option<std::time::Duration>,
+    /// Script paths that came from the config file rather than a flag, and so
+    /// need consent before they are executed.
+    config_scripts: Vec<String>,
     provenance: Vec<(&'static str, String, Source)>,
+}
+
+/// Collect the script paths a run would execute that came from the config file.
+fn scripts_needing_consent(
+    dataset: &Option<String>,
+    dataset_source: Source,
+    reward_script: &Option<String>,
+    reward_script_source: Source,
+) -> Vec<String> {
+    let mut scripts = Vec::new();
+
+    // Only a `.py` dataset is executed; a CSV is read.
+    if dataset_source == Source::File && is_python_dataset(dataset) {
+        scripts.extend(dataset.clone());
+    }
+    if reward_script_source == Source::File {
+        scripts.extend(reward_script.clone());
+    }
+
+    scripts
 }
 
 /// Resolve how long inference sleeps between samples.
@@ -462,6 +486,13 @@ fn resolve_train(file: &FileConfig, args: &TrainArgs) -> Resolved {
         ));
     }
 
+    let config_scripts = scripts_needing_consent(
+        &dataset,
+        dataset_source,
+        &reward_script,
+        reward_script_source,
+    );
+
     Resolved {
         config: aixker_rlt::configurations::Configurations {
             interval_secs: file.interval_secs.unwrap_or(DEFAULT_INTERVAL_SECS),
@@ -481,6 +512,7 @@ fn resolve_train(file: &FileConfig, args: &TrainArgs) -> Resolved {
         csv_has_header,
         csv_delimiter,
         script_timeout,
+        config_scripts,
         provenance,
     }
 }
@@ -550,6 +582,8 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
         provenance.extend(csv_provenance);
     }
 
+    let config_scripts = scripts_needing_consent(&dataset, dataset_source, &None, Source::Default);
+
     Resolved {
         config: aixker_rlt::configurations::Configurations {
             interval_secs,
@@ -571,6 +605,8 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
         csv_has_header,
         csv_delimiter,
         script_timeout,
+        // Inference has no reward script; only a `.py` dataset is executed.
+        config_scripts,
         provenance,
     }
 }
@@ -635,6 +671,7 @@ async fn run_train(
     file_config: &FileConfig,
     config_file: Option<&str>,
     out: Output,
+    allow_scripts: bool,
     args: TrainArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolved = resolve_train(file_config, &args);
@@ -675,6 +712,8 @@ async fn run_train(
         out.note("Dry run enabled. No training will be performed.");
         return Ok(());
     }
+
+    authorise_scripts(&resolved.config_scripts, allow_scripts, config_file)?;
 
     // The reward factory ends the run through this; the data source is what
     // the library actually listens to.
@@ -733,6 +772,62 @@ async fn run_train(
 
     log::info!("training finished");
     Ok(())
+}
+
+/// Decide whether scripts named by the config file may be executed.
+///
+/// `rlt` runs the Python files it is pointed at — that is the feature. But a
+/// path typed on the command line is an informed choice, while one discovered
+/// in a `Config.toml` was not necessarily made by the person running the
+/// command. Someone who clones a repository and runs `rlt train` in it has
+/// asked to train a model, not to execute whatever that directory nominates.
+///
+/// So the two cases are treated differently: flags pass through, and config
+/// file paths need consent — a `y` at the prompt when someone is there to give
+/// it, and `--allow-scripts` when nobody is.
+fn authorise_scripts(
+    scripts: &[String],
+    allowed: bool,
+    config_file: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if scripts.is_empty() || allowed {
+        return Ok(());
+    }
+
+    let source = config_file.unwrap_or("the config file");
+    let listing = scripts.join(", ");
+
+    // Nobody to ask. Refusing is the only safe answer, and it names the flag
+    // that turns this into a deliberate choice.
+    if !std::io::stdin().is_terminal() {
+        return Err(format!(
+            "{} names {} script(s) to execute: {}. Scripts run with your \
+             privileges, and these paths came from a file rather than the \
+             command line. Pass --allow-scripts to run them, or name them with \
+             a flag.",
+            source,
+            scripts.len(),
+            listing
+        )
+        .into());
+    }
+
+    eprintln!("{} asks to execute:", source);
+    for script in scripts {
+        eprintln!("  {}", script);
+    }
+    eprintln!("These run as you, with your privileges.");
+    eprint!("Run them? [y/N] ");
+    std::io::stderr().flush()?;
+
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+
+    if matches!(answer.trim(), "y" | "Y" | "yes" | "Yes") {
+        return Ok(());
+    }
+
+    Err("declined: no scripts were run".into())
 }
 
 /// Open the data provider a dataset path selects.
@@ -844,6 +939,7 @@ async fn run_infer(
     file_config: &FileConfig,
     config_file: Option<&str>,
     out: Output,
+    allow_scripts: bool,
     args: InferArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolved = resolve_infer(file_config, &args);
@@ -873,6 +969,8 @@ async fn run_infer(
     if !Path::new(&dataset_path).is_file() {
         return Err(format!("dataset not found: {}", dataset_path).into());
     }
+
+    authorise_scripts(&resolved.config_scripts, allow_scripts, config_file)?;
 
     // Opened before the run so a bad destination fails immediately, rather
     // than after the model has already computed decisions with nowhere to go.
@@ -941,6 +1039,10 @@ fn run_init(out: Output, args: InitArgs) -> Result<(), Box<dyn std::error::Error
     out.note("  rlt eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py");
     out.note("");
     out.note("The reward script defines what \"good\" means; edit it for your problem.");
+    out.note(
+        "Because the config names a script, `train` asks before running it. \
+         Add --allow-scripts to answer in advance, or when there is no terminal.",
+    );
 
     Ok(())
 }
@@ -1003,6 +1105,13 @@ fn resolve_eval(file: &FileConfig, args: &EvalArgs) -> Resolved {
         provenance.extend(csv_provenance);
     }
 
+    let config_scripts = scripts_needing_consent(
+        &dataset,
+        dataset_source,
+        &reward_script,
+        reward_script_source,
+    );
+
     Resolved {
         config: aixker_rlt::configurations::Configurations {
             interval_secs: 0,
@@ -1024,6 +1133,7 @@ fn resolve_eval(file: &FileConfig, args: &EvalArgs) -> Resolved {
         csv_has_header,
         csv_delimiter,
         script_timeout,
+        config_scripts,
         provenance,
     }
 }
@@ -1033,6 +1143,7 @@ async fn run_eval(
     file_config: &FileConfig,
     config_file: Option<&str>,
     out: Output,
+    allow_scripts: bool,
     args: EvalArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolved = resolve_eval(file_config, &args);
@@ -1069,6 +1180,8 @@ async fn run_eval(
     if !Path::new(&reward_path).is_file() {
         return Err(format!("reward script not found or not a file: {}", reward_path).into());
     }
+
+    authorise_scripts(&resolved.config_scripts, allow_scripts, config_file)?;
 
     let stop = StopSignal::new();
     stop_on_interrupt(stop.clone());
@@ -1426,11 +1539,38 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Init(args) => run_init(out, args)?,
-        Commands::Train(args) => run_train(&file_config, config_file.as_deref(), out, args).await?,
+        Commands::Train(args) => {
+            run_train(
+                &file_config,
+                config_file.as_deref(),
+                out,
+                cli.allow_scripts,
+                args,
+            )
+            .await?
+        }
         Commands::Inspect(args) => run_inspect(&file_config, out, args)?,
         Commands::Export(args) => run_export(&file_config, out, args)?,
-        Commands::Infer(args) => run_infer(&file_config, config_file.as_deref(), out, args).await?,
-        Commands::Eval(args) => run_eval(&file_config, config_file.as_deref(), out, args).await?,
+        Commands::Infer(args) => {
+            run_infer(
+                &file_config,
+                config_file.as_deref(),
+                out,
+                cli.allow_scripts,
+                args,
+            )
+            .await?
+        }
+        Commands::Eval(args) => {
+            run_eval(
+                &file_config,
+                config_file.as_deref(),
+                out,
+                cli.allow_scripts,
+                args,
+            )
+            .await?
+        }
     }
 
     Ok(())

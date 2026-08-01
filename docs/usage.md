@@ -117,6 +117,30 @@ reports the real path in its messages so you can always find the file.
 - The three convenience flags are mutually exclusive.
 - `--config FILE`
   - Path to a TOML config file. Defaults to `Config.toml` if present.
+- `--allow-scripts`
+  - Run Python scripts named by the **config file** without confirming. A path
+    you type is an informed choice and never asks; a path found in a
+    `Config.toml` prompts on a terminal and is refused without one. See
+    [Script trust](#script-trust) below.
+
+## Script trust
+
+`rlt` executes the Python files it is pointed at — that is what a data provider,
+a reward script and a heuristic baseline are. Where the path came from decides
+whether you are asked:
+
+| Path source | Behaviour |
+| --- | --- |
+| A flag (`--reward-script ./r.py`) | Runs. You typed it |
+| `Config.toml`, with a terminal | Lists the scripts and asks `[y/N]` |
+| `Config.toml`, no terminal | Refuses, exits non-zero, names `--allow-scripts` |
+| `--allow-scripts` | Runs without asking |
+
+Only `.py` paths are gated; a CSV dataset is read, not executed.
+
+The case this protects: cloning a repository, running `rlt train` inside it, and
+executing whatever that directory's config nominated — a path that never
+appeared on your command line. See [SECURITY.md](../SECURITY.md).
 
 ### `init`
 

@@ -117,15 +117,17 @@ fn init_scaffolds_a_project_that_trains_and_evaluates() {
         );
     }
 
-    // No flags: the scaffolded config has to be self-sufficient.
+    // The scaffolded config has to be self-sufficient apart from consent: it
+    // names a reward script, and these tests have no terminal to confirm at.
     rlt(&dir)
-        .arg("train")
+        .args(["--allow-scripts", "train"])
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success();
 
     rlt(&dir)
         .args([
+            "--allow-scripts",
             "eval",
             "--dataset",
             "./data/holdout.csv",
@@ -1021,6 +1023,71 @@ fn a_hanging_python_script_times_out_instead_of_hanging_the_cli() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("stopped answering"));
+}
+
+#[test]
+fn a_script_named_only_by_the_config_needs_consent() {
+    // The threat this guards: `cd` into a directory someone else prepared, run
+    // `rlt train`, and execute whatever their Config.toml nominates. The path
+    // never appears on your command line.
+    let dir = workspace(400);
+    fs::write(dir.path().join("reward.py"), FIXED_REWARD).unwrap();
+
+    let config = format!("{}reward_script = \"./reward.py\"\n", CONFIG);
+    fs::write(dir.path().join("Config.toml"), config).unwrap();
+
+    // No terminal here, so there is nobody to ask and refusing is the answer.
+    rlt(&dir)
+        .args(["train", "--dataset", "./data.csv"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--allow-scripts"))
+        .stderr(predicate::str::contains("./reward.py"));
+
+    assert!(
+        !dir.path().join(CHECKPOINT).exists(),
+        "a refused run must not have trained"
+    );
+
+    rlt(&dir)
+        .args(["--allow-scripts", "train", "--dataset", "./data.csv"])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success();
+}
+
+#[test]
+fn a_script_named_by_a_flag_needs_no_consent() {
+    // Typing the path is the informed choice the gate exists to require.
+    let dir = workspace(400);
+    fs::write(dir.path().join("reward.py"), FIXED_REWARD).unwrap();
+
+    rlt(&dir)
+        .args([
+            "train",
+            "--dataset",
+            "./data.csv",
+            "--reward-script",
+            "./reward.py",
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success();
+}
+
+#[test]
+fn a_csv_named_by_the_config_needs_no_consent() {
+    // Only scripts are executed; a dataset is read. Gating CSVs would be
+    // friction with nothing behind it.
+    let dir = workspace(400);
+    let config = format!("{}dataset = \"./data.csv\"\n", CONFIG);
+    fs::write(dir.path().join("Config.toml"), config).unwrap();
+
+    rlt(&dir)
+        .arg("train")
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success();
 }
 
 #[test]

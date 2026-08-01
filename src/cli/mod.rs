@@ -32,6 +32,10 @@ pub struct Cli {
     #[arg(long, value_name = "FILE")]
     pub config: Option<String>,
 
+    /// Run Python scripts named by the config file without confirming
+    #[arg(long, default_value_t = false)]
+    pub allow_scripts: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }
