@@ -43,7 +43,8 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
 ## Features
 
 - `train` subcommand for starting model training
-- `infer` subcommand for running inference against a trained model
+- `infer` subcommand for running inference against a trained model, emitting one
+  JSON line per decision to stdout or to `--output PATH`
 - `export` subcommand for exporting trained models
 - CPU or GPU compute via `--backend [cpu|gpu]` (CPU default; GPU via wgpu, no CUDA needed)
 - Python reward factory and Python data provider integration, each backed by a
@@ -120,11 +121,20 @@ Train using a Python data provider and a Python reward script:
 cargo run -- train --dataset ./scripts/system_metrics.py --epochs 20 --batch-size 64 --model-name my-model.json --reward-script ./scripts/reward_script.py
 ```
 
-Run inference:
+Run inference. Each decision is printed as a JSON line:
 
 ```bash
 cargo run -- infer --dataset ./your-data.csv --model-name my-model.json
 ```
+
+```text
+{"row":1,"action":2}
+{"row":2,"action":1}
+```
+
+Add `--with-features` to include the input that produced each decision, or
+`--output actions.jsonl` to write them to a file instead of stdout. Logs go to
+stderr, so the records pipe cleanly into `jq` or a downstream service.
 
 Export a trained model:
 

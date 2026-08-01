@@ -32,6 +32,7 @@ flowchart TD
 
     D --> |infer| U[Require a non-empty checkpoint]
     U --> V[Read features, emit actions]
+    V --> V2[Write one JSON line per decision]
 
     D --> |export| W[Require a non-empty checkpoint]
     W --> X[Copy the file verbatim]
@@ -62,8 +63,13 @@ flowchart TD
 1. The checkpoint must exist and be non-empty; otherwise the command fails
    rather than running an untrained model with random weights.
 2. Features are read from the same provider types as training.
-3. The model emits an action per sample. The loop sleeps `interval_secs` between
-   samples, which suits polling a live provider but is slow over a file.
+3. The model emits an action per sample. Each one is written as a JSON line to
+   stdout, or to `--output PATH`. Both provider paths share the same callback,
+   so neither can quietly stop reporting.
+4. Records name the **data-source row**, not a count of decisions, so a skipped
+   row leaves a gap rather than shifting every number after it.
+5. The loop sleeps `interval_secs` between samples, which suits polling a live
+   provider but is slow over a file.
 
 ## Export path
 

@@ -122,6 +122,43 @@ reports the real path in its messages so you can always find the file.
 - `--model-name NAME` — checkpoint to load. Required.
 - `--backend [cpu|gpu]` — as for `train`.
 - `--has-header [true|false]`, `--delimiter CHAR` — as for `train`.
+- `--output PATH`
+  - Where the decisions go. `-` is stdout. Default: `-`. Parent directories are
+    created as needed.
+- `--with-features`
+  - Include the input features in each record. Default: off.
+
+#### Output
+
+One JSON object per sample, one per line:
+
+```console
+$ RLT-CLI infer --dataset ./infer.csv --model-name my-model.json
+{"row":1,"action":2}
+{"row":2,"action":1}
+{"row":3,"action":2}
+```
+
+`--with-features` adds the input that produced each decision:
+
+```console
+$ RLT-CLI infer --dataset ./infer.csv --model-name my-model.json --with-features
+{"row":1,"features":[0.1,0.2,0.3,0.4,0.5,0.6],"action":0}
+```
+
+`row` is the number of the row **in the data source**, so a row that was skipped
+as unparseable leaves a gap rather than shifting every number after it.
+
+Records go to stdout and logs go to stderr, so the stream is machine-readable
+without any flags:
+
+```bash
+RLT-CLI infer --dataset ./infer.csv --model-name my-model.json 2>/dev/null | jq -c
+```
+
+`--silent` prints nothing, so it suppresses the records too — unless you also
+pass `--output PATH`, in which case the file is still written. A file you asked
+for is the result of the command, not chatter.
 
 Inference sleeps `interval_secs` between samples (default `10`), because its
 intended use is a polling decision loop against a live provider. Set

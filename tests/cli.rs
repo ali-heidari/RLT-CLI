@@ -61,6 +61,26 @@ fn rlt(dir: &TempDir) -> Command {
     command
 }
 
+/// A workspace holding a trained checkpoint and a three-row `infer.csv`.
+///
+/// Inference runs to the end of its dataset, so a small separate file keeps the
+/// assertions on the emitted records exact.
+fn trained_workspace() -> TempDir {
+    let dir = workspace(400);
+    fs::write(
+        dir.path().join("infer.csv"),
+        "0.1,0.2,0.3,0.4,0.5,0.6\n0.2,0.3,0.4,0.5,0.6,0.7\n0.3,0.4,0.5,0.6,0.7,0.8\n",
+    )
+    .unwrap();
+
+    rlt(&dir)
+        .args(["train", "--dataset", "./data.csv"])
+        .assert()
+        .success();
+
+    dir
+}
+
 #[test]
 fn train_writes_a_checkpoint() {
     let dir = workspace(400);
@@ -104,6 +124,131 @@ fn train_then_infer_then_export() {
         fs::read(&exported).unwrap(),
         fs::read(dir.path().join(CHECKPOINT)).unwrap(),
         "exported file must match the checkpoint"
+    );
+}
+
+#[test]
+fn infer_emits_one_action_per_sample() {
+    // Regression: both provider branches computed actions and then threw them
+    // away. The CSV callback discarded them outright; the Python one logged
+    // them at debug level, which is off by default. `infer` did its work and
+    // printed nothing.
+    let dir = trained_workspace();
+
+    let stdout = rlt(&dir)
+        .args(["infer", "--dataset", "./infer.csv"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+
+    let records: Vec<&str> = stdout
+        .lines()
+        .filter(|line| line.starts_with('{'))
+        .collect();
+
+    assert_eq!(records.len(), 3, "expected one record per row:\n{}", stdout);
+    assert!(records[0].contains("\"row\":1"), "{}", records[0]);
+    assert!(records[0].contains("\"action\":"), "{}", records[0]);
+    assert!(records[2].contains("\"row\":3"), "{}", records[2]);
+    assert!(
+        !records.iter().any(|record| record.contains("features")),
+        "features must be opt-in:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn infer_with_features_includes_the_input_row() {
+    let dir = trained_workspace();
+
+    rlt(&dir)
+        .args(["infer", "--dataset", "./infer.csv", "--with-features"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"features\":[0.1,"));
+}
+
+#[test]
+fn infer_can_write_its_actions_to_a_file() {
+    let dir = trained_workspace();
+
+    rlt(&dir)
+        .args([
+            "infer",
+            "--dataset",
+            "./infer.csv",
+            "--output",
+            "./actions.jsonl",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"action\":").not());
+
+    let written = fs::read_to_string(dir.path().join("actions.jsonl")).unwrap();
+    assert_eq!(written.lines().count(), 3, "{}", written);
+}
+
+#[test]
+fn silent_still_writes_an_action_file_that_was_asked_for() {
+    // --silent means "print nothing", not "do nothing": a file the user named
+    // is the result of the command, not chatter.
+    let dir = trained_workspace();
+
+    let output = rlt(&dir)
+        .args([
+            "--silent",
+            "infer",
+            "--dataset",
+            "./infer.csv",
+            "--output",
+            "./actions.jsonl",
+        ])
+        .output()
+        .unwrap();
+
+    assert_only_the_upstream_line_leaked(&output);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("actions.jsonl"))
+            .unwrap()
+            .lines()
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn silent_infer_without_a_destination_prints_no_actions() {
+    let dir = trained_workspace();
+
+    let output = rlt(&dir)
+        .args(["--silent", "infer", "--dataset", "./infer.csv"])
+        .output()
+        .unwrap();
+
+    assert_only_the_upstream_line_leaked(&output);
+}
+
+/// Assert that a silent run emitted nothing of its own.
+///
+/// The library prints `EMPTY INPUT` straight to stdout when the data source
+/// ends, bypassing the log filter the CLI configures — `docs/found-issues.md`
+/// issue 5. Every inference run ends that way, so `--silent infer` cannot be
+/// byte-for-byte silent until that is fixed upstream. Asserting on the exact
+/// remainder keeps the test honest: anything the CLI itself prints still fails.
+fn assert_only_the_upstream_line_leaked(output: &std::process::Output) {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        "EMPTY INPUT",
+        "--silent leaked more than the known upstream line"
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "--silent leaked {} bytes of stderr",
+        output.stderr.len()
     );
 }
 

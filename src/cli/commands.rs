@@ -70,6 +70,14 @@ pub struct InferArgs {
     /// Field separator for CSV datasets [default: ,]
     #[arg(long, value_name = "CHAR")]
     pub delimiter: Option<char>,
+
+    /// Where to write one JSON line per decision; "-" is stdout [default: -]
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<String>,
+
+    /// Include the input features in each output record
+    #[arg(long)]
+    pub with_features: bool,
 }
 
 #[derive(clap::Args, Debug)]

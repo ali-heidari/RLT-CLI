@@ -147,6 +147,14 @@ where
         self.rows_read + self.rows_skipped + 1
     }
 
+    /// 1-based number of the most recently accepted row in the data source.
+    ///
+    /// Reported alongside each inference decision, so a record can be traced
+    /// back to the row that produced it even when rows in between were skipped.
+    pub fn last_row_number(&self) -> usize {
+        self.rows_read + self.rows_skipped
+    }
+
     fn width_message(&self, got: usize, row_number: usize) -> String {
         format!(
             "feature width mismatch at row {}: input_number is {} but the row has {} value(s). \
@@ -260,6 +268,18 @@ mod tests {
             "{}",
             message
         );
+    }
+
+    #[test]
+    fn the_last_row_number_counts_rows_that_were_skipped() {
+        // Each inference record names the row it came from, so the number has
+        // to follow the data source rather than count decisions.
+        let mut source = source(vec![ok(&[1.0, 2.0]), err("bad line"), ok(&[3.0, 4.0])], 2);
+
+        source.next_features();
+        assert_eq!(source.last_row_number(), 1);
+        source.next_features();
+        assert_eq!(source.last_row_number(), 3);
     }
 
     #[test]

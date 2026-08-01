@@ -1,7 +1,9 @@
+mod action_writer;
 mod cli;
 mod providers;
 mod reward_factory;
 
+use action_writer::{ActionWriter, STDOUT_DESTINATION};
 use clap::Parser;
 use cli::commands::{ExportArgs, InferArgs, TrainArgs};
 use cli::{Cli, Commands};
@@ -313,6 +315,9 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
     let (csv_has_header, csv_delimiter, csv_provenance) =
         resolve_csv(args.has_header, args.delimiter, file);
 
+    let (actions_output, actions_output_source) =
+        resolve(args.output.clone(), None, STDOUT_DESTINATION.to_string());
+
     let mut provenance = vec![
         ("dataset", show(&dataset, "<not set>"), dataset_source),
         (
@@ -324,6 +329,24 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
             "backend",
             format!("{:?}", backend).to_lowercase(),
             backend_source,
+        ),
+        (
+            "actions output",
+            if actions_output == STDOUT_DESTINATION {
+                "stdout".to_string()
+            } else {
+                actions_output
+            },
+            actions_output_source,
+        ),
+        (
+            "action features",
+            args.with_features.to_string(),
+            if args.with_features {
+                Source::Flag
+            } else {
+                Source::Default
+            },
         ),
     ];
 
@@ -539,6 +562,30 @@ where
     Ok(())
 }
 
+/// The inference callback: record the decision, then tell the library to carry
+/// on.
+///
+/// Both provider branches use this, so the two paths cannot drift apart — which
+/// is how one of them ended up logging its actions at debug level while the
+/// other discarded them outright.
+///
+/// Locking the source here is safe: the library drops the guard the input
+/// closure took before it calls this one.
+fn action_recorder<I>(
+    source: Arc<Mutex<FeatureSource<I>>>,
+    actions: Arc<ActionWriter>,
+) -> impl Fn(&Vec<f32>, u32, u32) -> (f32, bool)
+where
+    I: Iterator<Item = Row>,
+{
+    move |features: &Vec<f32>, action: u32, _counter: u32| {
+        let row = source.lock().unwrap().last_row_number();
+        actions.emit(row, features, action);
+        // Inference computes no reward; `true` keeps the loop running.
+        (0.0, true)
+    }
+}
+
 async fn run_infer(
     file_config: &FileConfig,
     config_file: Option<&str>,
@@ -573,6 +620,14 @@ async fn run_infer(
         return Err(format!("dataset not found: {}", dataset_path).into());
     }
 
+    // Opened before the run so a bad destination fails immediately, rather
+    // than after the model has already computed decisions with nowhere to go.
+    let actions = Arc::new(ActionWriter::new(
+        args.output.as_deref().unwrap_or(STDOUT_DESTINATION),
+        args.with_features,
+        out.silent,
+    )?);
+
     let config = Arc::new(config);
 
     // Determine which data provider to use based on file extension
@@ -595,15 +650,7 @@ async fn run_infer(
 
         aixker_rlt::node::Node::start(
             move |_lowest_state| node_source.lock().unwrap().next_features(),
-            |features, action, counter| {
-                log::debug!(
-                    "features: {:?}, action: {}, counter: {}",
-                    features,
-                    action,
-                    counter
-                );
-                (0.0, true)
-            },
+            action_recorder(source.clone(), actions.clone()),
             aixker_rlt::RunningMode::Infer,
             &config.model_name,
         )
@@ -627,7 +674,7 @@ async fn run_infer(
 
         aixker_rlt::node::Node::start(
             move |_lowest_state| node_source.lock().unwrap().next_features(),
-            |_features, _action, _reward| (0.0, true),
+            action_recorder(source.clone(), actions.clone()),
             aixker_rlt::RunningMode::Infer,
             &config.model_name,
         )
@@ -635,6 +682,10 @@ async fn run_infer(
 
         report_source(&source)?;
     }
+
+    // A destination that could not be written is a failed run: the decisions
+    // are the result of the command.
+    actions.finish()?;
 
     log::info!("inference completed");
     Ok(())
