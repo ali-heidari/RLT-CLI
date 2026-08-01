@@ -61,6 +61,15 @@ fn rlt(dir: &TempDir) -> Command {
     command
 }
 
+/// A workspace whose config says nothing about `interval_secs`, so the
+/// dataset-derived default applies.
+fn workspace_without_interval(rows: usize) -> TempDir {
+    let dir = workspace(rows);
+    let config = CONFIG.replace("interval_secs = 0\n", "");
+    fs::write(dir.path().join("Config.toml"), config).unwrap();
+    dir
+}
+
 /// A workspace holding a trained checkpoint and a three-row `infer.csv`.
 ///
 /// Inference runs to the end of its dataset, so a small separate file keeps the
@@ -158,6 +167,27 @@ fn infer_emits_one_action_per_sample() {
         "features must be opt-in:\n{}",
         stdout
     );
+}
+
+#[test]
+fn inference_over_a_file_does_not_poll() {
+    // Regression: inference slept 10s between samples whatever the dataset, so
+    // a 400-row CSV took 67 minutes. The e2e suite only passed because every
+    // config it wrote set interval_secs = 0 by hand. The timeout is the
+    // assertion; the settings line proves which rule applied.
+    let dir = workspace_without_interval(400);
+
+    rlt(&dir)
+        .args(["train", "--dataset", "./data.csv"])
+        .assert()
+        .success();
+
+    rlt(&dir)
+        .args(["infer", "--dataset", "./data.csv"])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("interval: 0s (file dataset)"));
 }
 
 #[test]

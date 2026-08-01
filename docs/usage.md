@@ -128,6 +128,9 @@ reports the real path in its messages so you can always find the file.
 - `--backend [cpu|gpu]` — as for `train`.
 - `--has-header [true|false]`, `--delimiter CHAR` — as for `train`.
 - `--script-timeout SECS` — as for `train`.
+- `--interval-secs SECS`
+  - Seconds slept between samples. Default: `0` for a file dataset, `10` for a
+    `.py` provider. See [Polling interval](#polling-interval) below.
 - `--output PATH`
   - Where the decisions go. `-` is stdout. Default: `-`. Parent directories are
     created as needed.
@@ -166,9 +169,28 @@ RLT-CLI infer --dataset ./infer.csv --model-name my-model.json 2>/dev/null | jq 
 pass `--output PATH`, in which case the file is still written. A file you asked
 for is the result of the command, not chatter.
 
-Inference sleeps `interval_secs` between samples (default `10`), because its
-intended use is a polling decision loop against a live provider. Set
-`interval_secs = 0` in the config file when running inference over a file.
+#### Polling interval
+
+Inference sleeps between samples, because one of its uses is a polling decision
+loop against a live provider. The default depends on the dataset:
+
+| Dataset | Default interval | Why |
+| --- | --- | --- |
+| A file (CSV) | `0` | The rows are already there; there is nothing to wait for |
+| A `.py` provider | `10` | It is sampling a live source |
+
+`--interval-secs SECS`, or `interval_secs` in the config file, overrides both —
+the rule replaces the default, not your configuration. The settings block names
+which applied:
+
+```text
+  interval: 0s (file dataset)
+  interval: 10s (default)
+  interval: 5s (flag)
+```
+
+Training never sleeps: the library only polls in inference mode, so
+`interval_secs` has no effect on `train`.
 
 The checkpoint must exist and be non-empty; otherwise the command fails rather
 than running an untrained model.
@@ -200,7 +222,7 @@ All keys are optional. See [Config.sample.toml](../Config.sample.toml).
 | `output_number` | — | `3` |
 | `hidden_layers` | — | `16` |
 | `reply_capacity` | — | `4096` |
-| `interval_secs` | — | `10` |
+| `interval_secs` | `--interval-secs` | `0` for a file, `10` for a `.py` provider |
 | `log_interval` | — | `64` |
 | `backend` | `--backend` | `"Cpu"` |
 | `has_header` | `--has-header` | `false` |

@@ -86,6 +86,10 @@ pub struct InferArgs {
     /// Seconds to wait for a Python script to answer; 0 waits forever [default: 30]
     #[arg(long, value_name = "SECS")]
     pub script_timeout: Option<u64>,
+
+    /// Seconds slept between samples [default: 0 for a file, 10 for a .py provider]
+    #[arg(long, value_name = "SECS")]
+    pub interval_secs: Option<u64>,
 }
 
 #[derive(clap::Args, Debug)]

@@ -74,6 +74,10 @@ enum Source {
     Flag,
     File,
     Default,
+    /// A default chosen from context rather than a fixed constant, carrying the
+    /// reason it was chosen — "one setting, several defaults" is confusing
+    /// unless the report says which one applied and why.
+    Derived(&'static str),
 }
 
 impl Source {
@@ -82,6 +86,7 @@ impl Source {
             Source::Flag => "flag".to_string(),
             Source::File => config_file.unwrap_or("config file").to_string(),
             Source::Default => "default".to_string(),
+            Source::Derived(reason) => reason.to_string(),
         }
     }
 }
@@ -153,6 +158,28 @@ struct Resolved {
     /// How long a Python script may take to answer. `None` waits forever.
     script_timeout: Option<std::time::Duration>,
     provenance: Vec<(&'static str, String, Source)>,
+}
+
+/// Resolve how long inference sleeps between samples.
+///
+/// The library polls between inference samples, which suits a live provider and
+/// makes no sense over a file — the rows are already there. So the *default*
+/// depends on the dataset: a 400-row CSV at the old flat default of 10s spent
+/// 67 minutes asleep. An explicit flag or config value still wins, so this only
+/// replaces the constant, not the configuration.
+fn resolve_interval(
+    flag: Option<u64>,
+    file: Option<u64>,
+    dataset: &Option<String>,
+) -> (u64, Source) {
+    match (flag, file) {
+        (Some(seconds), _) => (seconds, Source::Flag),
+        (None, Some(seconds)) => (seconds, Source::File),
+        (None, None) if dataset.is_some() && !is_python_dataset(dataset) => {
+            (0, Source::Derived("file dataset"))
+        }
+        (None, None) => (DEFAULT_INTERVAL_SECS, Source::Default),
+    }
 }
 
 /// Resolve the Python script deadline and describe where it came from.
@@ -361,6 +388,8 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
         resolve_csv(args.has_header, args.delimiter, file);
     let (script_timeout, script_timeout_shown, script_timeout_source) =
         resolve_script_timeout(args.script_timeout, file.script_timeout_secs);
+    let (interval_secs, interval_source) =
+        resolve_interval(args.interval_secs, file.interval_secs, &dataset);
 
     let (actions_output, actions_output_source) =
         resolve(args.output.clone(), None, STDOUT_DESTINATION.to_string());
@@ -377,6 +406,7 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
             format!("{:?}", backend).to_lowercase(),
             backend_source,
         ),
+        ("interval", format!("{}s", interval_secs), interval_source),
         (
             "actions output",
             if actions_output == STDOUT_DESTINATION {
@@ -411,7 +441,7 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
 
     Resolved {
         config: aixker_rlt::configurations::Configurations {
-            interval_secs: file.interval_secs.unwrap_or(DEFAULT_INTERVAL_SECS),
+            interval_secs,
             batch_size: file.batch_size.unwrap_or(DEFAULT_BATCH_SIZE),
             total_batches: file
                 .total_batches
@@ -1022,6 +1052,77 @@ mod tests {
             checkpoint_path("m.json"),
             PathBuf::from("./models/m.json.m.json")
         );
+    }
+
+    fn infer_args() -> InferArgs {
+        InferArgs {
+            dataset: None,
+            model_name: None,
+            backend: None,
+            has_header: None,
+            delimiter: None,
+            output: None,
+            with_features: false,
+            script_timeout: None,
+            interval_secs: None,
+        }
+    }
+
+    #[test]
+    fn inference_over_a_file_does_not_poll_but_a_live_provider_does() {
+        // Regression: the flat 10s default applied to files too, so inference
+        // over a 400-row CSV spent 67 minutes asleep.
+        let csv = resolve_infer(
+            &FileConfig::default(),
+            &InferArgs {
+                dataset: Some("data.csv".to_string()),
+                ..infer_args()
+            },
+        );
+        assert_eq!(csv.config.interval_secs, 0);
+
+        let live = resolve_infer(
+            &FileConfig::default(),
+            &InferArgs {
+                dataset: Some("provider.py".to_string()),
+                ..infer_args()
+            },
+        );
+        assert_eq!(live.config.interval_secs, DEFAULT_INTERVAL_SECS);
+    }
+
+    #[test]
+    fn an_explicit_interval_beats_the_dataset_rule() {
+        // The rule replaces the default, not the configuration.
+        let flagged = resolve_infer(
+            &FileConfig::default(),
+            &InferArgs {
+                dataset: Some("data.csv".to_string()),
+                interval_secs: Some(5),
+                ..infer_args()
+            },
+        );
+        assert_eq!(flagged.config.interval_secs, 5);
+
+        let configured = resolve_infer(
+            &FileConfig {
+                interval_secs: Some(7),
+                ..FileConfig::default()
+            },
+            &InferArgs {
+                dataset: Some("data.csv".to_string()),
+                ..infer_args()
+            },
+        );
+        assert_eq!(configured.config.interval_secs, 7);
+    }
+
+    #[test]
+    fn the_derived_interval_says_why_it_was_chosen() {
+        let (seconds, source) = resolve_interval(None, None, &Some("data.csv".to_string()));
+
+        assert_eq!(seconds, 0);
+        assert_eq!(source.label(Some("Config.toml")), "file dataset");
     }
 
     #[test]

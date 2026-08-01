@@ -61,7 +61,9 @@ script_timeout_secs = 30
 # --- Runtime ------------------------------------------------------------
 
 # Seconds slept between samples during inference; training ignores it.
-# Set to 0 for batch inference over a file. Default: 10
+# Overridden by --interval-secs. Leave it unset to get the right default from
+# the dataset: 0 for a file, since the rows are already there, and 10 for a .py
+# provider, which is sampling a live source. Setting it here applies to both.
 interval_secs = 10
 
 # How often the library logs a training footstep. Default: 64
