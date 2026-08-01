@@ -6,11 +6,20 @@
 //! and each response line a JSON object with `reward` and `success`.
 
 use crate::providers::python_worker::PythonWorker;
+use crate::stop_signal::StopSignal;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::error::Error;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+/// Consecutive reward failures tolerated before the run is abandoned.
+///
+/// Mirrors the data provider's threshold. One bad answer should not kill a long
+/// run, but a script that fails over and over trains every remaining step on a
+/// fabricated zero reward and still writes a checkpoint that looks legitimate.
+const MAX_CONSECUTIVE_ERRORS: usize = 10;
 
 #[derive(Serialize)]
 struct RewardRequest {
@@ -28,11 +37,16 @@ pub struct RewardFactory {
     /// `Mutex` because the node loop calls `evaluate` through a `Fn` closure,
     /// while talking to the worker needs `&mut`.
     worker: Option<Mutex<PythonWorker>>,
+    /// How the run is ended once the script has stopped answering.
+    stop: Arc<StopSignal>,
+    /// Atomic for the same reason the worker is behind a `Mutex`: `evaluate`
+    /// only ever gets `&self`.
+    consecutive_errors: AtomicUsize,
 }
 
 impl RewardFactory {
     /// Build a factory, starting the reward script if one was configured.
-    pub fn new(script_path: Option<&Path>) -> Result<Self, Box<dyn Error>> {
+    pub fn new(script_path: Option<&Path>, stop: Arc<StopSignal>) -> Result<Self, Box<dyn Error>> {
         let worker = match script_path {
             Some(path) => {
                 let path = path
@@ -43,7 +57,11 @@ impl RewardFactory {
             None => None,
         };
 
-        Ok(Self { worker })
+        Ok(Self {
+            worker,
+            stop,
+            consecutive_errors: AtomicUsize::new(0),
+        })
     }
 
     pub fn evaluate<F, A, R>(&self, features: F, action: A, _prev_reward: R) -> (f32, bool)
@@ -69,9 +87,23 @@ impl RewardFactory {
         };
 
         match ask(worker, &request) {
-            Ok(response) => (response.reward, response.success),
+            Ok(response) => {
+                self.consecutive_errors.store(0, Ordering::Relaxed);
+                (response.reward, response.success)
+            }
             Err(err) => {
                 log::error!("reward script failed: {}", err);
+
+                // Returning (0.0, false) forever is how a run used to "succeed"
+                // having trained entirely on rewards the script never produced.
+                let failures = self.consecutive_errors.fetch_add(1, Ordering::Relaxed) + 1;
+                if failures >= MAX_CONSECUTIVE_ERRORS {
+                    self.stop.stop(format!(
+                        "reward script failed {} times in a row, last error: {}",
+                        failures, err
+                    ));
+                }
+
                 (0.0, false)
             }
         }

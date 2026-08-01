@@ -5,7 +5,9 @@
 //! that conversion, and is where bad data is caught instead of being quietly
 //! turned into a row of zeros the model would train on.
 
+use crate::stop_signal::StopSignal;
 use std::error::Error;
+use std::sync::Arc;
 
 /// A row as produced by a data provider.
 pub type Row = Result<Vec<f64>, Box<dyn Error>>;
@@ -36,6 +38,9 @@ pub struct FeatureSource<I> {
     exhausted: bool,
     /// Set when the run must stop and report a failure.
     fatal: Option<String>,
+    /// How something outside the data source ends the run. Optional: a source
+    /// with nothing to listen to is perfectly valid.
+    stop: Option<Arc<StopSignal>>,
 }
 
 impl<I> FeatureSource<I>
@@ -52,7 +57,14 @@ where
             consecutive_errors: 0,
             exhausted: false,
             fatal: None,
+            stop: None,
         }
+    }
+
+    /// Listen to a signal that ends the run from outside the data source.
+    pub fn with_stop_signal(mut self, stop: Arc<StopSignal>) -> Self {
+        self.stop = Some(stop);
+        self
     }
 
     /// Read the first row, check its width, and keep it for the run.
@@ -85,6 +97,19 @@ where
     pub fn next_features(&mut self) -> Vec<f32> {
         if self.exhausted || self.fatal.is_some() {
             return Vec::new();
+        }
+
+        // Something outside the data source asked the run to end — a reward
+        // script that stopped answering, for instance. Reporting it as fatal
+        // here is what turns it into a non-zero exit with an explanation.
+        if let Some(stop) = &self.stop {
+            if stop.is_stopped() {
+                self.fatal = Some(
+                    stop.reason()
+                        .unwrap_or_else(|| "the run was stopped".to_string()),
+                );
+                return Vec::new();
+            }
         }
 
         if let Some(row) = self.pending.take() {
@@ -268,6 +293,22 @@ mod tests {
             "{}",
             message
         );
+    }
+
+    #[test]
+    fn a_stop_signal_ends_the_run_and_explains_why() {
+        // The library only stops on an empty vector, so a failure anywhere else
+        // — a reward script that died, say — has to arrive through here.
+        let signal = StopSignal::new();
+        let mut source =
+            source(vec![ok(&[1.0, 2.0]), ok(&[3.0, 4.0])], 2).with_stop_signal(signal.clone());
+
+        assert_eq!(source.next_features(), vec![1.0, 2.0]);
+        signal.stop("reward script failed 10 times in a row".to_string());
+        assert!(source.next_features().is_empty());
+
+        let message = source.finish().unwrap_err().to_string();
+        assert!(message.contains("failed 10 times in a row"), "{}", message);
     }
 
     #[test]

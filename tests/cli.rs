@@ -502,6 +502,120 @@ fn a_python_provider_that_dies_is_reported() {
 }
 
 #[test]
+fn a_working_reward_script_trains_to_completion() {
+    let dir = workspace(400);
+    fs::write(
+        dir.path().join("reward.py"),
+        "import json, sys\n\
+         for line in sys.stdin:\n\
+         \x20   print(json.dumps({\"reward\": 1.0, \"success\": True}), flush=True)\n",
+    )
+    .unwrap();
+
+    rlt(&dir)
+        .args([
+            "train",
+            "--dataset",
+            "./data.csv",
+            "--reward-script",
+            "./reward.py",
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success();
+
+    assert!(dir.path().join(CHECKPOINT).is_file());
+}
+
+#[test]
+fn a_dead_reward_script_fails_the_run() {
+    // Regression: a reward script that died logged one error per step and let
+    // training run to the end, exiting zero with a checkpoint trained entirely
+    // on rewards the script never produced.
+    let dir = workspace(400);
+    fs::write(
+        dir.path().join("dead_reward.py"),
+        "import sys\nsys.exit('reward script crashed')\n",
+    )
+    .unwrap();
+
+    rlt(&dir)
+        .args([
+            "train",
+            "--dataset",
+            "./data.csv",
+            "--reward-script",
+            "./dead_reward.py",
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "reward script failed 10 times in a row",
+        ));
+}
+
+#[test]
+fn a_reward_script_that_answers_garbage_fails_the_run() {
+    // The worker stays alive here, so this exercises the failure counter rather
+    // than a closed pipe.
+    let dir = workspace(400);
+    fs::write(
+        dir.path().join("garbage_reward.py"),
+        "import sys\n\
+         for line in sys.stdin:\n\
+         \x20   print('not json', flush=True)\n",
+    )
+    .unwrap();
+
+    rlt(&dir)
+        .args([
+            "train",
+            "--dataset",
+            "./data.csv",
+            "--reward-script",
+            "./garbage_reward.py",
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "reward script failed 10 times in a row",
+        ));
+}
+
+#[test]
+fn transient_reward_failures_do_not_abort_the_run() {
+    // Nine failures and then answers: the streak resets, so a flaky script does
+    // not add up to an abort over a long run.
+    let dir = workspace(400);
+    fs::write(
+        dir.path().join("flaky_reward.py"),
+        "import json, sys\n\
+         failures = 0\n\
+         for line in sys.stdin:\n\
+         \x20   if failures < 9:\n\
+         \x20       failures += 1\n\
+         \x20       print('not json', flush=True)\n\
+         \x20   else:\n\
+         \x20       print(json.dumps({\"reward\": 1.0, \"success\": True}), flush=True)\n",
+    )
+    .unwrap();
+
+    rlt(&dir)
+        .args([
+            "train",
+            "--dataset",
+            "./data.csv",
+            "--reward-script",
+            "./flaky_reward.py",
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success();
+}
+
+#[test]
 fn help_lists_the_commands_and_no_dead_flags() {
     let dir = workspace(1);
 

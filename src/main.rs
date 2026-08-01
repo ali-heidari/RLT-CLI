@@ -2,6 +2,7 @@ mod action_writer;
 mod cli;
 mod providers;
 mod reward_factory;
+mod stop_signal;
 
 use action_writer::{ActionWriter, STDOUT_DESTINATION};
 use clap::Parser;
@@ -15,6 +16,7 @@ use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use stop_signal::StopSignal;
 
 /// Config file used when `--config` is not given. Unlike an explicitly
 /// requested file this one is optional, so a fresh clone runs without it.
@@ -464,7 +466,10 @@ async fn run_train(
         return Ok(());
     }
 
-    let reward_factory = RewardFactory::new(reward_script.as_deref())?;
+    // The reward factory ends the run through this; the data source is what
+    // the library actually listens to.
+    let stop = StopSignal::new();
+    let reward_factory = RewardFactory::new(reward_script.as_deref(), stop.clone())?;
 
     // Determine which data provider to use based on file extension
     let is_python_script = dataset_path.ends_with(".py");
@@ -476,7 +481,7 @@ async fn run_train(
         log::info!("using Python script data provider from {}", dataset_path);
         let provider = open_python_script(&dataset_path)?;
 
-        let mut source = FeatureSource::new(provider, input_number);
+        let mut source = FeatureSource::new(provider, input_number).with_stop_signal(stop.clone());
         let width = source.validate_first()?;
         log::info!("first sample loaded with {} feature(s)", width);
 
@@ -501,7 +506,7 @@ async fn run_train(
         let dataset = open_csv_dataset(&dataset_path, options)?;
         log::info!("opened CSV dataset stream from {}", dataset_path);
 
-        let mut source = FeatureSource::new(dataset, input_number);
+        let mut source = FeatureSource::new(dataset, input_number).with_stop_signal(stop.clone());
         let width = source.validate_first()?;
         log::info!("first CSV row loaded with {} field(s)", width);
 

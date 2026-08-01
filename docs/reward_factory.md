@@ -88,8 +88,22 @@ not a useful objective.
 - **A script that dies mid-run** is reported with its exit status rather than
   hanging the CLI.
 - **Invalid JSON, or a missing field**, is logged at error level and that step
-  falls back to `(0.0, false)`; the run continues. Watch for repeated
-  `reward script failed:` lines — they mean the objective is not being applied.
+  falls back to `(0.0, false)`. A single bad answer does not end the run: a
+  script with an occasional hiccup should not kill a long one.
+- **Ten consecutive failures end the run**, with a non-zero exit and the last
+  error as the message:
+
+  ```text
+  Error: reward script failed 10 times in a row, last error: invalid JSON
+  reward response 'not json': expected ident at line 1 column 2.
+  ```
+
+  This mirrors the data provider's threshold. Without it, a script that died on
+  the first step let training run to completion on rewards it never produced,
+  exiting zero and leaving a checkpoint that looked legitimate — the worst kind
+  of failure for a decision engine, because nothing about it looks wrong.
+
+  Any successful answer resets the count, so the ten have to be consecutive.
 - Stderr is inherited, so `print(..., file=sys.stderr)` reaches your terminal.
 
 ## Notes
