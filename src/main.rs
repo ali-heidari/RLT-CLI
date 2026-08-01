@@ -1,13 +1,14 @@
 mod action_writer;
 mod cli;
 mod eval;
+mod init;
 mod providers;
 mod reward_factory;
 mod stop_signal;
 
 use action_writer::{ActionWriter, STDOUT_DESTINATION};
 use clap::Parser;
-use cli::commands::{EvalArgs, ExportArgs, InferArgs, ReportFormat, TrainArgs};
+use cli::commands::{EvalArgs, ExportArgs, InferArgs, InitArgs, ReportFormat, TrainArgs};
 use cli::{Cli, Commands};
 use eval::{Baseline, PolicyStats, Report};
 use providers::csv_dataset::{open_csv_dataset, CsvOptions};
@@ -861,6 +862,26 @@ async fn run_infer(
     Ok(())
 }
 
+/// Scaffold a working project.
+fn run_init(out: Output, args: InitArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let dir = Path::new(&args.dir);
+    let written = init::write(dir, args.force)?;
+
+    out.line(format!("Scaffolded {} file(s):", written.len()));
+    for path in &written {
+        out.line(format!("  {}", path.display()));
+    }
+
+    out.line("");
+    out.line("Next:");
+    out.line("  RLT-CLI train");
+    out.line("  RLT-CLI eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py");
+    out.line("");
+    out.line("The reward script defines what \"good\" means; edit it for your problem.");
+
+    Ok(())
+}
+
 /// Resolve evaluation settings with precedence: flag, then config file, then default.
 ///
 /// `interval_secs` is forced to 0: evaluation is a batch pass over a held-out
@@ -1229,18 +1250,29 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // the two spellings disagree. `--silent` resolves to Silent, so it still
     // behaves the same.
     let out = Output::new(matches!(log_level, cli::LogLevel::Silent));
-    let (file_config, config_file) = load_file_config(cli.config.as_ref())?;
 
-    out.line(format!(
-        "AIXKER-RLT CLI invoked with log level: {:?}",
-        log_level
-    ));
-    match &config_file {
-        Some(path) => out.line(format!("Using config file: {}", path)),
-        None => out.line("No config file found; using built-in defaults."),
-    }
+    // `init` is the one command that has to work without a usable config file:
+    // its whole job is to write one, and a directory holding a broken or
+    // unrelated `Config.toml` is exactly where someone reaches for it.
+    let (file_config, config_file) = if matches!(cli.command, Commands::Init(_)) {
+        (FileConfig::default(), None)
+    } else {
+        let loaded = load_file_config(cli.config.as_ref())?;
+
+        out.line(format!(
+            "AIXKER-RLT CLI invoked with log level: {:?}",
+            log_level
+        ));
+        match &loaded.1 {
+            Some(path) => out.line(format!("Using config file: {}", path)),
+            None => out.line("No config file found; using built-in defaults."),
+        }
+
+        loaded
+    };
 
     match cli.command {
+        Commands::Init(args) => run_init(out, args)?,
         Commands::Train(args) => run_train(&file_config, config_file.as_deref(), out, args).await?,
         Commands::Export(args) => run_export(&file_config, out, args)?,
         Commands::Infer(args) => run_infer(&file_config, config_file.as_deref(), out, args).await?,

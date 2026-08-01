@@ -2,6 +2,8 @@ use clap::{Subcommand, ValueEnum};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Scaffold a config, reward script, and sample data ready to train on
+    Init(InitArgs),
     /// Start training a model with customizable hyperparameters
     Train(TrainArgs),
     /// Perform inference to get actions from a trained model
@@ -10,6 +12,17 @@ pub enum Commands {
     Eval(EvalArgs),
     /// Export a trained model to a supported format
     Export(ExportArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct InitArgs {
+    /// Directory to scaffold into
+    #[arg(value_name = "DIR", default_value = ".")]
+    pub dir: String,
+
+    /// Overwrite files that already exist
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
 }
 
 #[derive(clap::Args, Debug)]

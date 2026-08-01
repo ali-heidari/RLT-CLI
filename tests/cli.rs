@@ -91,6 +91,78 @@ fn trained_workspace() -> TempDir {
 }
 
 #[test]
+fn init_scaffolds_a_project_that_trains_and_evaluates() {
+    // The quickstart, end to end, on a fresh empty directory. This asserts the
+    // three commands work together — not that the policy wins; on the pinned
+    // library revision it does not (docs/found-issues.md issue 8).
+    let dir = TempDir::new().unwrap();
+
+    rlt(&dir)
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Config.toml"));
+
+    for scaffolded in [
+        "Config.toml",
+        "scripts/reward.py",
+        "scripts/heuristic.py",
+        "data/train.csv",
+        "data/holdout.csv",
+    ] {
+        assert!(
+            dir.path().join(scaffolded).is_file(),
+            "init did not write {}",
+            scaffolded
+        );
+    }
+
+    // No flags: the scaffolded config has to be self-sufficient.
+    rlt(&dir)
+        .arg("train")
+        .timeout(std::time::Duration::from_secs(120))
+        .assert()
+        .success();
+
+    rlt(&dir)
+        .args([
+            "eval",
+            "--dataset",
+            "./data/holdout.csv",
+            "--baseline",
+            "./scripts/heuristic.py",
+        ])
+        .timeout(std::time::Duration::from_secs(120))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Evaluated 400 sample(s)"))
+        .stdout(predicate::str::contains("Baseline: ./scripts/heuristic.py"));
+}
+
+#[test]
+fn init_refuses_to_overwrite_without_force() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("Config.toml"), "mine\n").unwrap();
+
+    rlt(&dir)
+        .arg("init")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already exist"));
+
+    assert_eq!(
+        fs::read_to_string(dir.path().join("Config.toml")).unwrap(),
+        "mine\n",
+        "a refused init must leave the existing file alone"
+    );
+
+    rlt(&dir).args(["init", "--force"]).assert().success();
+    assert!(fs::read_to_string(dir.path().join("Config.toml"))
+        .unwrap()
+        .contains("dataset"));
+}
+
+#[test]
 fn train_writes_a_checkpoint() {
     let dir = workspace(400);
 

@@ -91,6 +91,15 @@ reports the real path in its messages so you can always find the file.
 - `--config FILE`
   - Path to a TOML config file. Defaults to `Config.toml` if present.
 
+### `init`
+
+Scaffolds a config, a reward script, a heuristic baseline, and generated
+train/holdout datasets. See [init.md](init.md).
+
+- `[DIR]` — where to scaffold. Default: the current directory.
+- `--force` — overwrite files that already exist. Without it, `init` refuses
+  rather than replacing a reward script you wrote.
+
 ### `train`
 
 - `--dataset PATH`

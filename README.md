@@ -4,6 +4,40 @@
 
 A lightweight Rust command-line interface for [@ali-heidari/Aixker-RLT](https://github.com/ali-heidari/Aixker-RLT) model training, inference, and export workflows.
 
+## Quickstart
+
+Three commands on a fresh clone, no editing and no data of your own:
+
+```bash
+cargo build --release
+./target/release/RLT-CLI init      # config, reward script, heuristic, sample data
+./target/release/RLT-CLI train     # no flags: the scaffolded config has them
+./target/release/RLT-CLI eval --dataset ./data/holdout.csv \
+  --baseline ./scripts/heuristic.py
+```
+
+The last command is the one that matters — it scores the trained policy against
+a plain threshold rule and tells you which won:
+
+```text
+Policy: quickstart.json          mean reward 0.3325   success 33.2%
+Baseline: ./scripts/heuristic.py mean reward 0.6700   success 67.0%
+
+Difference: -0.3375 mean reward, -33.8pp success rate
+The baseline beats the policy.
+```
+
+**Yes, that says the baseline wins.** On the library revision this CLI pins, a
+trained policy scores at chance on a rule a linear model should solve, and
+training 30× longer does not change it. The cause is upstream and documented in
+[docs/found-issues.md](docs/found-issues.md) issue 8: learning is far too weak
+at the hardcoded learning rate, and inference samples from the action
+distribution instead of taking the best action.
+
+It is printed here rather than hidden because a tool that tells you your model
+is not worth shipping is doing its job. See [docs/init.md](docs/init.md) for the
+full walkthrough.
+
 ## Overview
 
 `RLT-CLI` provides a simple CLI wrapper around AIXKER-RLT concepts for training reinforcement learning models, running inference, and exporting trained artifacts.
@@ -19,7 +53,8 @@ It supports two Python integration points. In both cases the script is started
    from a Python script on demand, for system metrics, sensors, simulations, or
    other dynamic sources.
 
-You supply your own data; no dataset ships with this repository.
+You supply your own data; no dataset ships with this repository. `RLT-CLI init`
+generates a small one so the first run needs nothing from you.
 
 ## CLI workflow
 
@@ -46,6 +81,8 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
 
 ## Features
 
+- `init` subcommand scaffolding a config, reward script, heuristic baseline, and
+  sample data — a working project in one command
 - `train` subcommand for starting model training
 - `infer` subcommand for running inference against a trained model, emitting one
   JSON line per decision to stdout or to `--output PATH`
