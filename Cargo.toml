@@ -1,6 +1,6 @@
 [package]
 name = "aixker-rlt-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Command-line interface for training, evaluating and serving Aixker-RLT policies"
 license = "Apache-2.0"
