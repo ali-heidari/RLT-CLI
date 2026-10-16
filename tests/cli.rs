@@ -231,15 +231,7 @@ fn infer_emits_one_action_per_sample() {
     // command's result and nothing else, so `rlt infer | jq` works. The banner
     // and settings block go to stderr — filtering for `{` here is exactly what
     // hid the fact that they used to share this stream.
-    //
-    // `EMPTY INPUT` is excluded by name because the library prints it straight
-    // to stdout when a data source ends, past every filter this CLI configures
-    // (docs/found-issues.md issue 5). The exclusion is deliberately narrow:
-    // anything else that is not a record still fails.
-    let records: Vec<&str> = stdout
-        .lines()
-        .filter(|line| !line.is_empty() && *line != "EMPTY INPUT")
-        .collect();
+    let records: Vec<&str> = stdout.lines().filter(|line| !line.is_empty()).collect();
     assert!(
         records.iter().all(|line| line.starts_with('{')),
         "stdout must be records only:\n{}",
@@ -327,7 +319,7 @@ fn silent_still_writes_an_action_file_that_was_asked_for() {
         .output()
         .unwrap();
 
-    assert_only_the_upstream_line_leaked(&output);
+    assert_nothing_leaked(&output);
     assert_eq!(
         fs::read_to_string(dir.path().join("actions.jsonl"))
             .unwrap()
@@ -346,22 +338,19 @@ fn silent_infer_without_a_destination_prints_no_actions() {
         .output()
         .unwrap();
 
-    assert_only_the_upstream_line_leaked(&output);
+    assert_nothing_leaked(&output);
 }
 
 /// Assert that a silent run emitted nothing of its own.
 ///
-/// The library prints `EMPTY INPUT` straight to stdout when the data source
-/// ends, bypassing the log filter the CLI configures — `docs/found-issues.md`
-/// issue 5. Every inference run ends that way, so `--silent infer` cannot be
-/// byte-for-byte silent until that is fixed upstream. Asserting on the exact
-/// remainder keeps the test honest: anything the CLI itself prints still fails.
-fn assert_only_the_upstream_line_leaked(output: &std::process::Output) {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(
-        stdout.trim(),
-        "EMPTY INPUT",
-        "--silent leaked more than the known upstream line"
+/// Byte for byte: aixker-rlt 0.1.0 printed `EMPTY INPUT` straight to stdout
+/// when a data source ended, and 0.2.0 logs it instead, so nothing at all may
+/// reach either stream.
+fn assert_nothing_leaked(output: &std::process::Output) {
+    assert!(
+        output.stdout.is_empty(),
+        "--silent leaked stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
     );
     assert!(
         output.stderr.is_empty(),
@@ -698,10 +687,8 @@ fn eval_emits_a_json_summary() {
         .success();
 
     // Parsed, not merely searched: --format json exists so a CI step can read
-    // the result back. Written to a file rather than redirected from stdout
-    // because the library prints EMPTY INPUT straight to stdout when a data
-    // source ends (docs/found-issues.md issue 5), which would leave the
-    // redirect holding something that is not JSON through no fault of ours.
+    // the result back. Written through --output, so this also covers the file
+    // destination.
     let written = fs::read_to_string(dir.path().join("report.json")).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&written)
         .unwrap_or_else(|err| panic!("report is not JSON ({}):\n{}", err, written));

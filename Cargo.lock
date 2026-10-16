@@ -33,8 +33,8 @@ source = "git+https://github.com/ali-heidari/aion-math#cf5bd3a9b476f80c4540bf24d
 
 [[package]]
 name = "aixker-rlt"
-version = "0.1.0"
-source = "git+https://github.com/ali-heidari/Aixker-RLT?rev=b0603e0#b0603e083e58a713c5e74729852ea4be2d2cc05f"
+version = "0.2.0"
+source = "git+https://github.com/ali-heidari/Aixker-RLT?branch=develop#3c38cde3e98382df77fa4395eaf31fa54d676616"
 dependencies = [
  "aion-math",
  "anyhow",

@@ -18,12 +18,12 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-# Pinned deliberately. Every workaround in this CLI — the doubled checkpoint
-# path, the empty-checkpoint guard, all of docs/found-issues.md — is written
-# against this revision. An unpinned git dependency resolves to whatever the
-# default branch points at today, so one upstream push would silently
-# invalidate the lot.
-aixker-rlt = { git = "https://github.com/ali-heidari/Aixker-RLT", rev = "b0603e0" }
+# 0.2.0, from the develop branch. The branch alone would follow every upstream
+# push; the committed Cargo.lock is what pins the exact commit this CLI was
+# tested against. Every workaround here — the doubled checkpoint path, the
+# empty-checkpoint guard — is written against that commit, so move it only
+# with `cargo update -p aixker-rlt` and a full test run.
+aixker-rlt = { git = "https://github.com/ali-heidari/Aixker-RLT", branch = "develop" }
 csv = "1.3"
 tokio = { version = "1", features = ["full"] }
 toml = "0.8"

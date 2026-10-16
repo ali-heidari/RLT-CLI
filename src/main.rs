@@ -506,6 +506,7 @@ fn resolve_train(file: &FileConfig, args: &TrainArgs) -> Resolved {
             log_interval: file.log_interval.unwrap_or(DEFAULT_LOG_INTERVAL),
             mode: aixker_rlt::RunningMode::Training,
             backend,
+            ..Default::default()
         },
         dataset,
         reward_script,
@@ -599,6 +600,7 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
             log_interval: file.log_interval.unwrap_or(DEFAULT_LOG_INTERVAL),
             mode: aixker_rlt::RunningMode::Infer,
             backend,
+            ..Default::default()
         },
         dataset,
         reward_script: None,
@@ -1127,6 +1129,7 @@ fn resolve_eval(file: &FileConfig, args: &EvalArgs) -> Resolved {
             log_interval: file.log_interval.unwrap_or(DEFAULT_LOG_INTERVAL),
             mode: aixker_rlt::RunningMode::Infer,
             backend,
+            ..Default::default()
         },
         dataset,
         reward_script,
@@ -1328,12 +1331,6 @@ fn resolve_checkpoint(
 }
 
 /// Deliver a command's report, to a file or to stdout.
-///
-/// A file is worth having for more than tidiness. The library prints
-/// `EMPTY INPUT` directly to stdout when a data source ends
-/// (`docs/found-issues.md` issue 5), bypassing every filter this CLI
-/// configures, so `--format json > report.json` yields a file that is not
-/// JSON. `--output` sidesteps a stream we do not fully control.
 fn write_report(
     destination: Option<&str>,
     out: Output,
