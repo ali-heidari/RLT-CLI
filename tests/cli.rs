@@ -360,6 +360,26 @@ fn assert_nothing_leaked(output: &std::process::Output) {
 }
 
 #[test]
+fn training_that_completes_no_batch_fails_and_leaves_no_checkpoint() {
+    // batch_size is 8, so five rows never fill a batch. aixker-rlt 0.2.0 saves
+    // when its loop ends regardless, which would leave untrained weights
+    // looking like a trained model.
+    let dir = workspace(5);
+
+    rlt(&dir)
+        .args(["train", "--dataset", "./data.csv"])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no batch was trained"));
+
+    assert!(
+        !dir.path().join(CHECKPOINT).exists(),
+        "an untrained checkpoint was left behind"
+    );
+}
+
+#[test]
 fn inferring_without_a_checkpoint_fails_instead_of_using_random_weights() {
     let dir = workspace(20);
 

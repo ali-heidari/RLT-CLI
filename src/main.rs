@@ -996,8 +996,13 @@ async fn run_train(
     let source = Arc::new(Mutex::new(source));
     let node_source = source.clone();
 
-    aixker_rlt::initialize(config.clone());
-    aixker_rlt::node::Node::start(
+    // Taken before the run, because the library always saves when its loop
+    // ends: afterwards a file is there whether or not anything was trained.
+    let checkpoint = checkpoint_path(&config.model_name);
+    let existed_before = checkpoint.exists();
+
+    let node = aixker_rlt::node::Node::start_with_config(
+        config.clone(),
         move |_lowest_state| node_source.lock().unwrap().next_features(),
         move |features, action, _counter| reward_factory.evaluate(features, action),
         aixker_rlt::RunningMode::Training,
@@ -1007,22 +1012,30 @@ async fn run_train(
 
     report_source(&source)?;
 
-    // A run that never completed a batch leaves the checkpoint empty. Exiting
-    // zero without saying so is how "training worked" turns into "inference
-    // fails for no visible reason" later.
-    let checkpoint = checkpoint_path(&config.model_name);
-    match fs::metadata(&checkpoint) {
-        Ok(metadata) if metadata.len() > 0 => log::info!(
-            "checkpoint written to {} ({} bytes)",
-            absolute(&checkpoint),
-            metadata.len()
-        ),
-        _ => log::warn!(
-            "no model was saved to {}: the run ended before a full batch completed. \
+    // A run that never completed a batch still leaves a checkpoint, holding
+    // untrained weights. Exiting zero over that is how "training worked" turns
+    // into "inference returns confident nonsense" later.
+    let batches = node.batch_history.read().unwrap().len();
+    if batches == 0 {
+        // Only a file this run created: a checkpoint that was there before is
+        // one we resumed from, and the library rewrote it unchanged.
+        if !existed_before {
+            let _ = fs::remove_file(&checkpoint);
+        }
+        return Err(format!(
+            "no batch was trained: the data ran out before {} samples were collected. \
              Check that the dataset holds enough rows for batch_size and total_batches.",
-            absolute(&checkpoint)
-        ),
+            config.batch_size
+        )
+        .into());
     }
+
+    log::info!(
+        "trained {} batch(es); checkpoint written to {} ({} bytes)",
+        batches,
+        absolute(&checkpoint),
+        fs::metadata(&checkpoint).map(|m| m.len()).unwrap_or(0)
+    );
 
     log::info!("training finished");
     Ok(())
@@ -1237,8 +1250,6 @@ async fn run_infer(
 
     let config = Arc::new(config);
 
-    aixker_rlt::initialize(config.clone());
-
     let input_number = config.input_number;
 
     // Ctrl-C part-way through a long file should still leave the decisions
@@ -1260,7 +1271,8 @@ async fn run_infer(
     let source = Arc::new(Mutex::new(source));
     let node_source = source.clone();
 
-    aixker_rlt::node::Node::start(
+    aixker_rlt::node::Node::start_with_config(
+        config.clone(),
         move |_lowest_state| node_source.lock().unwrap().next_features(),
         action_recorder(source.clone(), actions.clone()),
         aixker_rlt::RunningMode::Infer,
@@ -1495,8 +1507,8 @@ async fn run_eval(
     let scoring_baseline = baseline_stats.clone();
     let scoring_stop = stop.clone();
 
-    aixker_rlt::initialize(config.clone());
-    aixker_rlt::node::Node::start(
+    aixker_rlt::node::Node::start_with_config(
+        config.clone(),
         move |_lowest_state| node_source.lock().unwrap().next_features(),
         move |features: &Vec<f32>, action: u32, _counter: u32| {
             // Both policies are scored on this same row. Evaluating them in
