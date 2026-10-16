@@ -1203,10 +1203,19 @@ fn help_lists_the_commands_and_no_dead_flags() {
         .stdout(predicate::str::contains("infer"))
         .stdout(predicate::str::contains("export"));
 
-    // --learning-rate was accepted and silently discarded; it must stay gone.
+    // --learning-rate was once accepted and silently discarded, because
+    // aixker-rlt 0.1.0 had no way to set it. 0.2.0 does, so the flag is back,
+    // and it has to reach the settings the run actually uses.
     rlt(&dir)
-        .args(["train", "--help"])
+        .args([
+            "train",
+            "--dataset",
+            "./data.csv",
+            "--learning-rate",
+            "0.2",
+            "--dry-run",
+        ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("learning-rate").not());
+        .stderr(predicate::str::contains("learning rate: 0.2 (flag)"));
 }

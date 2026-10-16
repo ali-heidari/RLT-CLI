@@ -58,6 +58,50 @@ reward_script = "./scripts/reward_script.py"
 # forever. Default: 30
 script_timeout_secs = 30
 
+# --- Learning -----------------------------------------------------------
+#
+# Every key here is optional, and the defaults are aixker-rlt 0.2.0's own.
+# Change them knowingly; the defaults are what the library was tested with.
+
+# Seed for every random choice: weight init, exploration, action sampling and
+# replay sampling. The same seed, data and settings train the same weights.
+# Overridden by --seed. Default: unset (each run differs)
+# seed = 42
+
+# Rewrite rewards with the library's built-in shaping, which penalises failed
+# and over-used actions by up to about 0.5. Off by default: it swamps small
+# rewards and taught 0.1.0 policies a single fixed action. Only consider it when
+# rewards are on the order of +/-1. Overridden by --reward-shaping.
+# Default: false
+# reward_shaping = false
+
+# SGD step size, applied once per batch. Overridden by --learning-rate.
+# Default: 0.05
+# learning_rate = 0.05
+
+# Clip each update so its gradient norm is at most this. 0 turns clipping off.
+# Default: 1.0
+# max_grad_norm = 1.0
+
+# Weight of the entropy bonus, which keeps the policy from becoming confident
+# before the reward supports it. 0 turns it off. Default: 0.1
+# entropy_coef = 0.1
+
+# Exploration schedule. The random-action rate (epsilon) and the sampling
+# temperature move in a straight line from their start to their end values
+# during the first `exploration_batches` batches, then stay there.
+# Defaults: 0.3 -> 0.05, 1.5 -> 1.0, over 500 batches
+# epsilon_start = 0.3
+# epsilon_end = 0.05
+# temperature_start = 1.5
+# temperature_end = 1.0
+# exploration_batches = 500
+
+# Sampling temperature for infer and eval. They never take random actions; 0
+# always takes the highest-scoring action. Overridden by --infer-temperature.
+# Default: 0.5
+# infer_temperature = 0.5
+
 # --- Runtime ------------------------------------------------------------
 
 # Seconds slept between samples during inference; training ignores it.
@@ -66,7 +110,9 @@ script_timeout_secs = 30
 # provider, which is sampling a live source. Setting it here applies to both.
 interval_secs = 10
 
-# How often the library logs a training footstep. Default: 64
+# Log one line of training statistics every N batches: reward mean and spread,
+# loss, gradient norm, exploration, the policy's action mix and its entropy.
+# 0 turns it off. Default: 64
 log_interval = 64
 
 # Compute backend: "Cpu" (default) or "Gpu". Overridden by --backend.

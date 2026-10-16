@@ -68,7 +68,9 @@ batch_size = {BATCH_SIZE}
 total_batches = {TOTAL_BATCHES}
 
 reply_capacity = 4096
-log_interval = 1000
+
+# Training statistics every N batches; 0 turns them off.
+log_interval = 10
 "#
     )
 }

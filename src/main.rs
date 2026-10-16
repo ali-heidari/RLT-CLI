@@ -73,13 +73,24 @@ struct FileConfig {
     has_header: Option<bool>,
     delimiter: Option<char>,
     script_timeout_secs: Option<u64>,
+    seed: Option<u64>,
+    reward_shaping: Option<bool>,
+    learning_rate: Option<f32>,
+    max_grad_norm: Option<f32>,
+    entropy_coef: Option<f32>,
+    epsilon_start: Option<f32>,
+    epsilon_end: Option<f32>,
+    temperature_start: Option<f32>,
+    temperature_end: Option<f32>,
+    exploration_batches: Option<u32>,
+    infer_temperature: Option<f32>,
 }
 
 /// Every key [`FileConfig`] understands.
 ///
 /// Kept in step with the struct by `every_config_field_is_in_the_known_key_set`,
 /// which fails to compile if a field is added without a matching entry here.
-const KNOWN_CONFIG_KEYS: [&str; 15] = [
+const KNOWN_CONFIG_KEYS: [&str; 26] = [
     "interval_secs",
     "batch_size",
     "total_batches",
@@ -95,6 +106,17 @@ const KNOWN_CONFIG_KEYS: [&str; 15] = [
     "has_header",
     "delimiter",
     "script_timeout_secs",
+    "seed",
+    "reward_shaping",
+    "learning_rate",
+    "max_grad_norm",
+    "entropy_coef",
+    "epsilon_start",
+    "epsilon_end",
+    "temperature_start",
+    "temperature_end",
+    "exploration_batches",
+    "infer_temperature",
 ];
 
 /// Keys ignored on purpose rather than warned about.
@@ -404,6 +426,205 @@ fn load_file_config(
     Ok((config, Some(path)))
 }
 
+/// Flags that override the library's learning settings.
+///
+/// Each command exposes only the ones that mean something to it; the rest stay
+/// `None` and fall through to the config file.
+#[derive(Default)]
+struct LearningFlags {
+    seed: Option<u64>,
+    reward_shaping: Option<bool>,
+    learning_rate: Option<f32>,
+    infer_temperature: Option<f32>,
+}
+
+/// The library's learning settings, resolved with the usual precedence.
+///
+/// `config` holds the library defaults with only these fields filled in, so the
+/// command's own `Configurations` can take the rest from it with `..`. The
+/// defaults come from `Configurations::default()` rather than constants here,
+/// so the CLI cannot drift from what the library considers sensible.
+struct Learning {
+    config: aixker_rlt::configurations::Configurations,
+    seed_source: Source,
+    reward_shaping_source: Source,
+    learning_rate_source: Source,
+    max_grad_norm_source: Source,
+    entropy_coef_source: Source,
+    exploration_source: Source,
+    infer_temperature_source: Source,
+}
+
+fn resolve_learning(file: &FileConfig, flags: LearningFlags) -> Learning {
+    let defaults = aixker_rlt::configurations::Configurations::default();
+
+    let (seed, seed_source) = resolve_opt(flags.seed, file.seed);
+    let (reward_shaping, reward_shaping_source) = resolve(
+        flags.reward_shaping,
+        file.reward_shaping,
+        defaults.reward_shaping,
+    );
+    let (learning_rate, learning_rate_source) = resolve(
+        flags.learning_rate,
+        file.learning_rate,
+        defaults.learning_rate,
+    );
+    let (max_grad_norm, max_grad_norm_source) =
+        resolve(None, file.max_grad_norm, defaults.max_grad_norm);
+    let (entropy_coef, entropy_coef_source) =
+        resolve(None, file.entropy_coef, defaults.entropy_coef);
+    let (infer_temperature, infer_temperature_source) = resolve(
+        flags.infer_temperature,
+        file.infer_temperature,
+        defaults.infer_temperature,
+    );
+
+    // Five keys, one schedule, one line in the report: it reads as the file's
+    // as soon as any part of it is.
+    let exploration_set = file.epsilon_start.is_some()
+        || file.epsilon_end.is_some()
+        || file.temperature_start.is_some()
+        || file.temperature_end.is_some()
+        || file.exploration_batches.is_some();
+
+    Learning {
+        config: aixker_rlt::configurations::Configurations {
+            seed,
+            reward_shaping,
+            learning_rate,
+            max_grad_norm,
+            entropy_coef,
+            epsilon_start: file.epsilon_start.unwrap_or(defaults.epsilon_start),
+            epsilon_end: file.epsilon_end.unwrap_or(defaults.epsilon_end),
+            temperature_start: file.temperature_start.unwrap_or(defaults.temperature_start),
+            temperature_end: file.temperature_end.unwrap_or(defaults.temperature_end),
+            exploration_batches: file
+                .exploration_batches
+                .unwrap_or(defaults.exploration_batches),
+            infer_temperature,
+            ..defaults
+        },
+        seed_source,
+        reward_shaping_source,
+        learning_rate_source,
+        max_grad_norm_source,
+        entropy_coef_source,
+        exploration_source: if exploration_set {
+            Source::File
+        } else {
+            Source::Default
+        },
+        infer_temperature_source,
+    }
+}
+
+impl Learning {
+    fn seed_row(&self) -> (&'static str, String, Source) {
+        let shown = match self.config.seed {
+            Some(seed) => seed.to_string(),
+            None => "<not set> (runs differ)".to_string(),
+        };
+        ("seed", shown, self.seed_source)
+    }
+
+    /// The rows a training run reports.
+    fn training_rows(&self) -> Vec<(&'static str, String, Source)> {
+        let c = &self.config;
+        vec![
+            self.seed_row(),
+            (
+                "learning rate",
+                c.learning_rate.to_string(),
+                self.learning_rate_source,
+            ),
+            (
+                "max grad norm",
+                if c.max_grad_norm == 0.0 {
+                    "off".to_string()
+                } else {
+                    c.max_grad_norm.to_string()
+                },
+                self.max_grad_norm_source,
+            ),
+            (
+                "entropy coef",
+                c.entropy_coef.to_string(),
+                self.entropy_coef_source,
+            ),
+            (
+                "exploration",
+                format!(
+                    "epsilon {} -> {}, temperature {} -> {} over {} batches",
+                    c.epsilon_start,
+                    c.epsilon_end,
+                    c.temperature_start,
+                    c.temperature_end,
+                    c.exploration_batches
+                ),
+                self.exploration_source,
+            ),
+            (
+                "reward shaping",
+                c.reward_shaping.to_string(),
+                self.reward_shaping_source,
+            ),
+        ]
+    }
+
+    /// The rows an inference or evaluation run reports.
+    fn inference_rows(&self) -> Vec<(&'static str, String, Source)> {
+        let shown = if self.config.infer_temperature == 0.0 {
+            "0 (greedy)".to_string()
+        } else {
+            self.config.infer_temperature.to_string()
+        };
+        vec![
+            self.seed_row(),
+            ("infer temperature", shown, self.infer_temperature_source),
+        ]
+    }
+}
+
+/// Reject learning settings the library would turn into NaNs or nonsense.
+///
+/// Checked up front so a typo fails before a script starts or a checkpoint is
+/// touched, rather than as a diverged model several minutes in.
+fn check_learning(
+    config: &aixker_rlt::configurations::Configurations,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let positive = [
+        ("learning_rate", config.learning_rate),
+        ("temperature_start", config.temperature_start),
+        ("temperature_end", config.temperature_end),
+    ];
+    let non_negative = [
+        ("max_grad_norm", config.max_grad_norm),
+        ("entropy_coef", config.entropy_coef),
+        ("infer_temperature", config.infer_temperature),
+    ];
+    let rates = [
+        ("epsilon_start", config.epsilon_start),
+        ("epsilon_end", config.epsilon_end),
+    ];
+
+    for (name, value) in positive {
+        if !(value.is_finite() && value > 0.0) {
+            return Err(format!("{} must be greater than 0, got {}", name, value).into());
+        }
+    }
+    for (name, value) in non_negative {
+        if !(value.is_finite() && value >= 0.0) {
+            return Err(format!("{} must be 0 or more, got {}", name, value).into());
+        }
+    }
+    for (name, value) in rates {
+        if !(0.0..=1.0).contains(&value) {
+            return Err(format!("{} must be between 0 and 1, got {}", name, value).into());
+        }
+    }
+    Ok(())
+}
+
 /// Resolve training settings with precedence: flag, then config file, then default.
 fn resolve_train(file: &FileConfig, args: &TrainArgs) -> Resolved {
     let (model_name, model_name_source) =
@@ -431,6 +652,17 @@ fn resolve_train(file: &FileConfig, args: &TrainArgs) -> Resolved {
         resolve_csv(args.has_header, args.delimiter, file);
     let (script_timeout, script_timeout_shown, script_timeout_source) =
         resolve_script_timeout(args.script_timeout, file.script_timeout_secs);
+    let learning = resolve_learning(
+        file,
+        LearningFlags {
+            seed: args.seed,
+            reward_shaping: args.reward_shaping,
+            learning_rate: args.learning_rate,
+            ..LearningFlags::default()
+        },
+    );
+    let (log_interval, log_interval_source) =
+        resolve(None, file.log_interval, DEFAULT_LOG_INTERVAL);
 
     let mut provenance = vec![
         ("dataset", show(&dataset, "<not set>"), dataset_source),
@@ -472,6 +704,16 @@ fn resolve_train(file: &FileConfig, args: &TrainArgs) -> Resolved {
         ),
     ];
 
+    provenance.extend(learning.training_rows());
+    provenance.push((
+        "stats log",
+        match log_interval {
+            0 => "off".to_string(),
+            n => format!("every {} batches", n),
+        },
+        log_interval_source,
+    ));
+
     // The CSV reader options are noise for a Python data provider.
     if !is_python_dataset(&dataset) {
         provenance.extend(csv_provenance);
@@ -503,10 +745,10 @@ fn resolve_train(file: &FileConfig, args: &TrainArgs) -> Resolved {
             hidden_layers: file.hidden_layers.unwrap_or(DEFAULT_HIDDEN_LAYERS),
             reply_capacity: file.reply_capacity.unwrap_or(DEFAULT_REPLY_CAPACITY),
             model_name: model_name.unwrap_or_default(),
-            log_interval: file.log_interval.unwrap_or(DEFAULT_LOG_INTERVAL),
+            log_interval,
             mode: aixker_rlt::RunningMode::Training,
             backend,
-            ..Default::default()
+            ..learning.config
         },
         dataset,
         reward_script,
@@ -534,6 +776,14 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
         resolve_script_timeout(args.script_timeout, file.script_timeout_secs);
     let (interval_secs, interval_source) =
         resolve_interval(args.interval_secs, file.interval_secs, &dataset);
+    let learning = resolve_learning(
+        file,
+        LearningFlags {
+            seed: args.seed,
+            infer_temperature: args.infer_temperature,
+            ..LearningFlags::default()
+        },
+    );
 
     let (actions_output, actions_output_source) =
         resolve(args.output.clone(), None, STDOUT_DESTINATION.to_string());
@@ -570,6 +820,7 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
             },
         ),
     ];
+    provenance.extend(learning.inference_rows());
 
     // The CSV reader options are noise for a Python data provider, and the
     // script deadline is noise for anything else.
@@ -600,7 +851,7 @@ fn resolve_infer(file: &FileConfig, args: &InferArgs) -> Resolved {
             log_interval: file.log_interval.unwrap_or(DEFAULT_LOG_INTERVAL),
             mode: aixker_rlt::RunningMode::Infer,
             backend,
-            ..Default::default()
+            ..learning.config
         },
         dataset,
         reward_script: None,
@@ -687,6 +938,7 @@ async fn run_train(
     if config.model_name.is_empty() {
         return Err("model_name must be set in the config file or via --model-name".into());
     }
+    check_learning(&config)?;
 
     let dataset_path = resolved
         .dataset
@@ -955,6 +1207,7 @@ async fn run_infer(
     if config.model_name.is_empty() {
         return Err("model_name must be set in the config file or via --model-name".into());
     }
+    check_learning(&config)?;
 
     // Without this the library silently falls back to random weights, and
     // inference returns confident-looking actions from an untrained model.
@@ -1068,6 +1321,14 @@ fn resolve_eval(file: &FileConfig, args: &EvalArgs) -> Resolved {
         resolve_csv(args.has_header, args.delimiter, file);
     let (script_timeout, script_timeout_shown, script_timeout_source) =
         resolve_script_timeout(args.script_timeout, file.script_timeout_secs);
+    let learning = resolve_learning(
+        file,
+        LearningFlags {
+            seed: args.seed,
+            infer_temperature: args.infer_temperature,
+            ..LearningFlags::default()
+        },
+    );
 
     let mut provenance = vec![
         ("dataset", show(&dataset, "<not set>"), dataset_source),
@@ -1096,6 +1357,7 @@ fn resolve_eval(file: &FileConfig, args: &EvalArgs) -> Resolved {
             backend_source,
         ),
     ];
+    provenance.extend(learning.inference_rows());
 
     if is_python_dataset(&dataset) {
         provenance.push((
@@ -1129,7 +1391,7 @@ fn resolve_eval(file: &FileConfig, args: &EvalArgs) -> Resolved {
             log_interval: file.log_interval.unwrap_or(DEFAULT_LOG_INTERVAL),
             mode: aixker_rlt::RunningMode::Infer,
             backend,
-            ..Default::default()
+            ..learning.config
         },
         dataset,
         reward_script,
@@ -1160,6 +1422,7 @@ async fn run_eval(
     if config.model_name.is_empty() {
         return Err("model_name must be set in the config file or via --model-name".into());
     }
+    check_learning(&config)?;
 
     let checkpoint = checkpoint_path(&config.model_name);
     ensure_checkpoint(
@@ -1590,6 +1853,9 @@ mod tests {
             has_header: None,
             delimiter: None,
             script_timeout: None,
+            seed: None,
+            reward_shaping: None,
+            learning_rate: None,
         }
     }
 
@@ -1640,11 +1906,22 @@ mod tests {
             has_header: _,
             delimiter: _,
             script_timeout_secs: _,
+            seed: _,
+            reward_shaping: _,
+            learning_rate: _,
+            max_grad_norm: _,
+            entropy_coef: _,
+            epsilon_start: _,
+            epsilon_end: _,
+            temperature_start: _,
+            temperature_end: _,
+            exploration_batches: _,
+            infer_temperature: _,
         } = FileConfig::default();
 
         assert_eq!(
             KNOWN_CONFIG_KEYS.len(),
-            15,
+            26,
             "a field was added to FileConfig; add its key to KNOWN_CONFIG_KEYS"
         );
     }
@@ -1745,6 +2022,115 @@ mod tests {
     }
 
     #[test]
+    fn learning_settings_default_to_the_librarys() {
+        // Reward shaping in particular must stay off unless asked for: it is
+        // what taught 0.1.0 policies a single fixed action.
+        let library = aixker_rlt::configurations::Configurations::default();
+        let resolved = resolve_train(&FileConfig::default(), &train_args()).config;
+
+        assert!(!resolved.reward_shaping);
+        assert_eq!(resolved.seed, None);
+        assert_eq!(resolved.learning_rate, library.learning_rate);
+        assert_eq!(resolved.max_grad_norm, library.max_grad_norm);
+        assert_eq!(resolved.entropy_coef, library.entropy_coef);
+        assert_eq!(resolved.epsilon_start, library.epsilon_start);
+        assert_eq!(resolved.temperature_end, library.temperature_end);
+        assert_eq!(resolved.exploration_batches, library.exploration_batches);
+        assert_eq!(resolved.infer_temperature, library.infer_temperature);
+    }
+
+    #[test]
+    fn learning_flags_beat_the_config_file() {
+        let file = FileConfig {
+            seed: Some(1),
+            learning_rate: Some(0.01),
+            reward_shaping: Some(true),
+            entropy_coef: Some(0.0),
+            exploration_batches: Some(10),
+            infer_temperature: Some(1.0),
+            ..FileConfig::default()
+        };
+
+        let from_file = resolve_train(&file, &train_args()).config;
+        assert_eq!(from_file.seed, Some(1));
+        assert_eq!(from_file.learning_rate, 0.01);
+        assert!(from_file.reward_shaping);
+        assert_eq!(from_file.entropy_coef, 0.0);
+        assert_eq!(from_file.exploration_batches, 10);
+
+        let args = TrainArgs {
+            seed: Some(2),
+            learning_rate: Some(0.1),
+            reward_shaping: Some(false),
+            ..train_args()
+        };
+        let flagged = resolve_train(&file, &args).config;
+        assert_eq!(flagged.seed, Some(2));
+        assert_eq!(flagged.learning_rate, 0.1);
+        assert!(!flagged.reward_shaping);
+
+        let infer = resolve_infer(
+            &file,
+            &InferArgs {
+                infer_temperature: Some(0.0),
+                ..infer_args()
+            },
+        )
+        .config;
+        assert_eq!(infer.infer_temperature, 0.0);
+        assert_eq!(infer.seed, Some(1));
+    }
+
+    #[test]
+    fn learning_settings_out_of_range_are_rejected() {
+        let valid = resolve_train(&FileConfig::default(), &train_args()).config;
+        assert!(check_learning(&valid).is_ok());
+
+        let cases = [
+            (
+                "learning_rate",
+                FileConfig {
+                    learning_rate: Some(0.0),
+                    ..FileConfig::default()
+                },
+            ),
+            (
+                "epsilon_start",
+                FileConfig {
+                    epsilon_start: Some(1.5),
+                    ..FileConfig::default()
+                },
+            ),
+            (
+                "temperature_end",
+                FileConfig {
+                    temperature_end: Some(0.0),
+                    ..FileConfig::default()
+                },
+            ),
+            (
+                "infer_temperature",
+                FileConfig {
+                    infer_temperature: Some(-1.0),
+                    ..FileConfig::default()
+                },
+            ),
+            (
+                "max_grad_norm",
+                FileConfig {
+                    max_grad_norm: Some(f32::NAN),
+                    ..FileConfig::default()
+                },
+            ),
+        ];
+        for (name, file) in cases {
+            let config = resolve_train(&file, &train_args()).config;
+            let error = check_learning(&config).unwrap_err().to_string();
+            assert!(error.contains(name), "{}: {}", name, error);
+        }
+    }
+
+    #[test]
     fn checkpoint_path_mirrors_the_librarys_doubled_name() {
         // See docs/found-issues.md issue 1: the library builds the file name
         // from the node id and the model name, and gets both from model_name.
@@ -1765,6 +2151,8 @@ mod tests {
             with_features: false,
             script_timeout: None,
             interval_secs: None,
+            seed: None,
+            infer_temperature: None,
         }
     }
 
