@@ -1260,3 +1260,96 @@ fn help_lists_the_commands_and_no_dead_flags() {
         .success()
         .stderr(predicate::str::contains("learning rate: 0.2 (flag)"));
 }
+
+/// The weight tensors of a workspace's checkpoint, without the text snapshot.
+fn checkpoint_weights(dir: &TempDir) -> Vec<serde_json::Value> {
+    let text = fs::read_to_string(dir.path().join(CHECKPOINT)).unwrap();
+    let checkpoint: serde_json::Value = serde_json::from_str(&text).unwrap();
+    ["w1", "b1", "w2", "b2"]
+        .iter()
+        .map(|name| checkpoint[name]["data"].clone())
+        .collect()
+}
+
+/// Train a few batches against a reward that varies with the action, so the
+/// weights actually move, then return the workspace.
+fn seeded_training(seed: &str) -> TempDir {
+    let dir = workspace(400);
+    fs::write(dir.path().join("reward.py"), FIXED_REWARD).unwrap();
+    fs::write(
+        dir.path().join("infer.csv"),
+        "0.1,0.2,0.3,0.4,0.5,0.6\n0.2,0.3,0.4,0.5,0.6,0.7\n0.3,0.4,0.5,0.6,0.7,0.8\n",
+    )
+    .unwrap();
+
+    rlt(&dir)
+        .args([
+            "train",
+            "--dataset",
+            "./data.csv",
+            "--reward-script",
+            "./reward.py",
+            "--seed",
+            seed,
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success();
+
+    dir
+}
+
+#[test]
+fn a_seeded_run_trains_saves_loads_and_infers_identically_twice() {
+    let first = seeded_training("7");
+    let second = seeded_training("7");
+    let other = seeded_training("8");
+
+    assert!(
+        checkpoint_weights(&first) == checkpoint_weights(&second),
+        "the same seed trained different weights"
+    );
+    assert!(
+        checkpoint_weights(&first) != checkpoint_weights(&other),
+        "a different seed trained the same weights; the seed is not reaching the library"
+    );
+
+    // Load each saved checkpoint back and infer from it.
+    let infer = |dir: &TempDir| -> String {
+        let output = rlt(dir)
+            .args(["infer", "--dataset", "./infer.csv", "--seed", "7"])
+            .timeout(std::time::Duration::from_secs(60))
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        String::from_utf8(output).unwrap()
+    };
+
+    let decisions = infer(&first);
+    assert_eq!(decisions.lines().count(), 3, "{}", decisions);
+    assert_eq!(
+        decisions,
+        infer(&second),
+        "same weights and seed, different decisions"
+    );
+}
+
+#[test]
+fn training_logs_the_librarys_statistics() {
+    // aixker-rlt logs these at info level every log_interval batches. They are
+    // the only view of whether a run is learning, so they must survive the
+    // CLI's logger configuration.
+    let dir = workspace(400);
+    let config = CONFIG.replace("log_interval = 1000", "log_interval = 1");
+    fs::write(dir.path().join("Config.toml"), config).unwrap();
+
+    rlt(&dir)
+        .args(["train", "--dataset", "./data.csv"])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("batch 1: reward mean="))
+        .stderr(predicate::str::contains("entropy="));
+}
