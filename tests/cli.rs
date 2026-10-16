@@ -93,8 +93,8 @@ fn trained_workspace() -> TempDir {
 #[test]
 fn init_scaffolds_a_project_that_trains_and_evaluates() {
     // The quickstart, end to end, on a fresh empty directory. This asserts the
-    // three commands work together — not that the policy wins; on the pinned
-    // library revision it does not (docs/found-issues.md issue 8).
+    // three commands work together — not that the policy wins; the scaffold's
+    // 60 batches are too few for that (docs/init.md).
     let dir = TempDir::new().unwrap();
 
     rlt(&dir)

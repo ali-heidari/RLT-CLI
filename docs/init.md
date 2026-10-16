@@ -60,8 +60,8 @@ but one a model that has learned the rule should clear comfortably.
 
 ## What you will actually see
 
-**The scaffolded policy does not beat the heuristic.** On the library revision
-this CLI pins, it scores about **33%** — chance, for three actions:
+**The scaffolded policy does not beat the heuristic.** After the scaffold's 60
+batches it scores about **33%** — chance, for three actions:
 
 ```text
 Policy: quickstart.json          mean reward 0.3325   success 33.2%
@@ -71,17 +71,27 @@ Difference: -0.3375 mean reward, -33.8pp success rate
 The baseline beats the policy.
 ```
 
-That is not a mistake in the scaffold, and training longer does not fix it —
-30× the batches gives 32.5%. It is a limitation in the `aixker-rlt` library,
-recorded in detail as [found-issues.md](found-issues.md) issue 8: training
-drives the policy toward a constant action rather than one that depends on its
-input. Selecting the best action rather than sampling — the obvious suspect —
-was measured and scores *worse*, so the fault is in what training optimises.
+Sixty batches keep the first run short, and they are too few to learn the
+rule. The training log says so: the policy's `entropy` stays near 1.0986 (ln 3),
+which means it still picks the three actions evenly.
 
-It is documented here rather than hidden because a quickstart that quietly
-showed a losing model would be worse, and because this is exactly the job
-`eval` exists to do. A tool that tells you your model is no good is working
-correctly; the alternative is shipping it.
+**Train longer and it wins.** The scaffolded `train.csv` holds enough rows for
+about 74 batches, so repeat it, then train for 700:
+
+```bash
+for i in $(seq 10); do cat data/train.csv; done > data/train10.csv
+rlt train --dataset ./data/train10.csv --epochs 7 --allow-scripts
+rlt eval --dataset ./data/holdout.csv --baseline ./scripts/heuristic.py --allow-scripts
+```
+
+With the default settings this scored **86–91.5%** across three seeds, against
+the heuristic's 67%. At 300 batches the policy roughly tied the heuristic. Pass
+`--seed` to `train` and `eval` to repeat a result exactly.
+
+On aixker-rlt 0.1.0, training longer did not help: 30× the batches still
+scored 32.5%, because the library's learner collapsed every policy onto one
+fixed action. 0.2.0 fixed that. A tool that tells you your model is no good is
+working correctly either way; the alternative is shipping it.
 
 Once the upstream issue is fixed, the same three commands become the real
 workflow — train, check it beats the heuristic, ship the checkpoint.

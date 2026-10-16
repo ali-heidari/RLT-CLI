@@ -147,19 +147,25 @@ The doubled file name is expected: the library builds it from the model name
 twice (see [found-issues.md](found-issues.md), issue 1). The CLI always reports
 the real path.
 
+### `no batch was trained: the data ran out before N samples were collected`
+
+Training read the whole dataset without filling a single batch, so nothing was
+learned. `train` exits non-zero, and removes the checkpoint if the run created
+it, so untrained weights cannot pass for a model later.
+
+The dataset needs at least `batch_size` rows. Reduce `batch_size`, or use more
+data.
+
 ### `checkpoint is empty: ./models/m.json.m.json. The model was never saved`
 
-Training ran but never completed a batch, so no weights were written. You will
-have seen this warning during training:
+The file exists but holds nothing. Current versions never leave one behind;
+it comes from an older run or another tool. Train again.
 
-```text
-WARN no model was saved to ./models/m.json.m.json: the run ended before a full
-     batch completed. Check that the dataset holds enough rows for batch_size
-     and total_batches.
-```
+### `this checkpoint was trained by aixker-rlt 0.1.0`
 
-The dataset needs enough rows to fill at least one batch. Reduce `batch_size`,
-or use more data.
+0.1.0's learner collapsed every policy onto one fixed action. The checkpoint
+still loads, because the file format did not change, but its decisions are not
+worth using. Delete it and train again.
 
 ### Inference returns implausible actions
 

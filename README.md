@@ -31,18 +31,27 @@ Difference: -0.3375 mean reward, -33.8pp success rate
 The baseline beats the policy.
 ```
 
-**Yes, that says the baseline wins.** On the library revision this CLI pins, a
-trained policy scores at chance on a rule a linear model should solve, and
-training 30× longer does not change it. The cause is upstream and documented in
-[docs/found-issues.md](docs/found-issues.md) issue 8. The weights do move with
-training, but toward a policy that ignores its input: after 76,800 samples the
-model ranks the same action first for every row. Taking the best action instead
-of sampling was measured and makes it *worse*, so the fault is in what the
-updates optimise, not in how the action is chosen.
+**Yes, that says the baseline wins.** The scaffold trains for 60 batches, so the
+first run finishes in moments, and that is too short. The policy has barely
+moved from picking at random, and the training log shows it: `entropy` stays
+near 1.0986, which is ln 3 for three actions.
 
-It is printed here rather than hidden because a tool that tells you your model
-is not worth shipping is doing its job. See [docs/init.md](docs/init.md) for the
-full walkthrough.
+Trained longer, it wins. On the same rule and the same held-out set, 700
+batches with the default settings scored **86–91.5%** across three seeds,
+against the heuristic's 67%. At 300 batches it roughly tied. The scaffolded
+dataset only holds enough rows for about 74 batches, so repeat it first:
+
+```bash
+for i in $(seq 10); do cat data/train.csv; done > data/train10.csv
+./target/release/rlt train --dataset ./data/train10.csv --epochs 7 --allow-scripts
+./target/release/rlt eval --dataset ./data/holdout.csv \
+  --baseline ./scripts/heuristic.py --allow-scripts
+```
+
+Before aixker-rlt 0.2.0, longer training did not help: the library's learner
+collapsed every policy onto one fixed action. A tool that tells you your model
+is not worth shipping is doing its job either way. See
+[docs/init.md](docs/init.md) for the full walkthrough.
 
 ## Overview
 
@@ -107,6 +116,9 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
   fields by line and column instead of silently substituting `0.0`
 - Clear setting precedence — flag, then config file, then default — with the
   origin of every effective value printed at the start of a run
+- Repeatable runs with `--seed`, and the library's learning settings — learning
+  rate, gradient clipping, entropy bonus, exploration schedule, inference
+  temperature — as config keys, with per-batch training statistics in the log
 - Global options for configuration files and logging level (`--verbose`, `--silent`, `--errors-only`, or fine-grained `--log-level`)
 - Built in Rust with `clap` for command parsing
 
@@ -115,6 +127,23 @@ See [docs/cli_workflow.md](docs/cli_workflow.md) for a detailed diagram and expl
 Requires Rust **1.92** or newer. That floor comes from the dependency tree —
 `wgpu`, pulled in by the GPU backend — not from this crate; `cargo` reports it
 if your toolchain is older.
+
+The CLI builds against **aixker-rlt 0.2.0**, taken from the library's `develop`
+branch:
+
+```toml
+aixker-rlt = { git = "https://github.com/ali-heidari/Aixker-RLT", branch = "develop" }
+```
+
+The committed `Cargo.lock` pins the exact commit the CLI was tested against, so
+a build does not move with the branch. To take a newer commit, run
+`cargo update -p aixker-rlt` and the full test suite.
+
+> **Retrain models from aixker-rlt 0.1.0.** 0.1.0's learner collapsed every
+> policy onto one fixed action. Its checkpoints still load, because the file
+> format did not change, but their decisions are not worth using. `inspect`,
+> `infer`, `eval` and `export` warn when they meet one; delete it and train
+> again.
 
 ### Build (Linux / macOS)
 
@@ -271,6 +300,40 @@ Provide a TOML configuration file with `--config Config.toml` to set defaults.
 Command-line flags override it. If no `--config` is given, `Config.toml` is used
 when present, and built-in defaults apply when it is not — a fresh clone runs
 without any config file. See [Config.sample.toml](Config.sample.toml).
+
+### Learning settings
+
+These come from aixker-rlt 0.2.0, and the defaults are the library's own. All
+are optional config keys; the ones you are most likely to change also have
+flags. [Config.sample.toml](Config.sample.toml) explains each one.
+
+| Config key | Flag | Default | Meaning |
+| --- | --- | --- | --- |
+| `seed` | `--seed` (train, infer, eval) | unset | Seed for every random choice. The same seed, data and settings train the same weights. Unset, each run differs. |
+| `reward_shaping` | `--reward-shaping` (train) | `false` | The library's built-in reward rewrite. It swamps small rewards; leave it off unless rewards are around ±1. |
+| `learning_rate` | `--learning-rate` (train) | `0.05` | SGD step size, applied once per batch. |
+| `max_grad_norm` | — | `1.0` | Clip each update to this gradient norm. `0` turns clipping off. |
+| `entropy_coef` | — | `0.1` | Entropy bonus that keeps the policy from becoming confident too early. `0` turns it off. |
+| `epsilon_start`, `epsilon_end` | — | `0.3`, `0.05` | Random-action rate at the start and end of the exploration schedule. |
+| `temperature_start`, `temperature_end` | — | `1.5`, `1.0` | Sampling temperature at the start and end of the schedule. |
+| `exploration_batches` | — | `500` | Batches over which epsilon and temperature move from start to end. |
+| `infer_temperature` | `--infer-temperature` (infer, eval) | `0.5` | Sampling temperature for `infer` and `eval`, which never take random actions. `0` always takes the best action. |
+| `log_interval` | — | `64` | Log one line of training statistics every N batches. `0` turns it off. |
+
+Out-of-range values, such as a learning rate of 0 or an epsilon above 1, fail
+before the run starts.
+
+**Match the schedule to the run.** `exploration_batches` defaults to 500, so a
+shorter run ends while still exploring heavily: the quickstart's 60 batches stop
+at epsilon 0.27. The library suggests about a quarter of `total_batches`. The statistics line looks like this:
+
+```text
+INFO aixker_rlt::node] batch 10: reward mean=0.31250 std=0.46351 | loss=0.00108 grad_norm=0.11846 | eps=0.296 temp=1.491 | policy=[0.341, 0.330, 0.329] entropy=1.0985 | taken=[0.469, 0.312, 0.219]
+```
+
+Watch `entropy` and `policy`. For three actions, an entropy near 1.0986 (ln 3)
+means the policy still picks evenly. A falling entropy with one `policy` value
+near 1 means it has settled on one action.
 
 ### Tests
 
