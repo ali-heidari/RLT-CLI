@@ -184,6 +184,19 @@ train/holdout datasets. See [init.md](init.md).
   - Skip the first CSV row instead of parsing it as data. Default: `false`.
 - `--delimiter CHAR`
   - CSV field separator; a single ASCII character. Default: `,`.
+- `--seed N`
+  - Seed for every random choice: weight init, exploration, action sampling and
+    replay sampling. The same seed, data and settings train the same weights.
+    Default: unset, so each run differs.
+- `--reward-shaping [true|false]`
+  - Rewrite rewards with the library's built-in shaping. It swamps small
+    rewards, so leave it off unless yours are around ±1. Default: `false`.
+- `--learning-rate RATE`
+  - SGD step size, applied once per batch. Must be greater than 0. Default:
+    `0.05`.
+
+The other learning settings are config keys only; see
+[Config file keys](#config-file-keys).
 
 ### `infer`
 
@@ -200,6 +213,10 @@ train/holdout datasets. See [init.md](init.md).
     created as needed.
 - `--with-features`
   - Include the input features in each record. Default: off.
+- `--seed N` — as for `train`. Makes the sampled actions repeat.
+- `--infer-temperature T`
+  - Sampling temperature for the policy's actions. Inference never takes
+    random actions; `0` always takes the highest-scoring one. Default: `0.5`.
 
 #### Output
 
@@ -228,12 +245,6 @@ stderr. So the stream is machine-readable without any flags:
 ```bash
 rlt infer --dataset ./infer.csv --model-name my-model.json 2>/dev/null | jq -c
 ```
-
-One caveat: the library prints `EMPTY INPUT` directly to stdout when the data
-source ends, past every filter this CLI configures
-([found-issues.md](found-issues.md) issue 5). Until that is fixed upstream, use
-`--output actions.jsonl` when the output must parse cleanly, or drop the line
-with `grep -v '^EMPTY INPUT'`.
 
 `--silent` prints nothing, so it suppresses the records too — unless you also
 pass `--output PATH`, in which case the file is still written. A file you asked
@@ -282,6 +293,8 @@ policy. Full details in [eval.md](eval.md).
   shell redirect for machine-readable output; see [eval.md](eval.md#machine-readable-output).
 - `--backend`, `--has-header`, `--delimiter`, `--script-timeout` — as for
   `train`.
+- `--seed N`, `--infer-temperature T` — as for `infer`. With a seed, two
+  evaluations of the same checkpoint score the same.
 
 Evaluation never sleeps between samples: it is a batch pass over a held-out
 file, so `interval_secs` does not apply.
@@ -356,11 +369,24 @@ All keys are optional. See [Config.sample.toml](../Config.sample.toml).
 | `hidden_layers` | — | `16` |
 | `reply_capacity` | — | `4096` |
 | `interval_secs` | `--interval-secs` | `0` for a file, `10` for a `.py` provider |
-| `log_interval` | — | `64` |
+| `log_interval` | — | `64` (batches between statistics lines; `0` = off) |
 | `backend` | `--backend` | `"Cpu"` |
 | `has_header` | `--has-header` | `false` |
 | `delimiter` | `--delimiter` | `","` |
 | `script_timeout_secs` | `--script-timeout` | `30` |
+| `seed` | `--seed` | unset (runs differ) |
+| `reward_shaping` | `--reward-shaping` | `false` |
+| `learning_rate` | `--learning-rate` | `0.05` |
+| `max_grad_norm` | — | `1.0` (`0` = no clipping) |
+| `entropy_coef` | — | `0.1` |
+| `epsilon_start`, `epsilon_end` | — | `0.3`, `0.05` |
+| `temperature_start`, `temperature_end` | — | `1.5`, `1.0` |
+| `exploration_batches` | — | `500` |
+| `infer_temperature` | `--infer-temperature` | `0.5` (`0` = greedy) |
+
+The learning keys come from aixker-rlt 0.2.0 and default to its own values. See
+[Learning settings](../README.md#learning-settings) for what each one does.
+Out-of-range values fail before the run starts.
 
 `input_number` must match the number of values in each row of your data; a
 mismatch is reported before training starts.

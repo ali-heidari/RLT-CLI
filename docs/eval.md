@@ -114,11 +114,13 @@ rlt eval --dataset ./holdout.csv --model-name my-model.json \
   --format json --output report.json
 ```
 
-**Use `--output`, not a stdout redirect.** The report goes to stdout by default
-and the settings block goes to stderr, so `> report.json` is *nearly* right —
-but the library prints `EMPTY INPUT` straight to stdout when a data source ends
-([found-issues.md](found-issues.md) issue 5), past every filter this CLI
-controls. `--output` writes the report and nothing else.
+The report goes to stdout by default and the settings block and logs go to
+stderr, so `> report.json` and `--output report.json` give the same file.
+
+`eval` samples the policy's actions at `infer_temperature` (default `0.5`) and
+never takes random ones. Pass `--seed` to make two evaluations of the same
+checkpoint score the same, or `--infer-temperature 0` to always take the
+policy's best action.
 
 ```json
 {

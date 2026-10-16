@@ -7,12 +7,12 @@ against.
 These are starting points, not solutions. The reward function is where your
 judgement goes, and nobody else's version of "good" will match yours.
 
-> **Before you invest a day in one of these.** On the `aixker-rlt` revision this
-> CLI pins, a trained policy decides no better than chance — see
-> [found-issues.md](found-issues.md) issue 8. The shapes and reward functions
-> below are the durable part and are worth writing down now; expect `eval` to
-> report the heuristic winning until that is fixed. Nothing here has been
-> demonstrated to beat its baseline.
+> **Before you invest a day in one of these.** None of these recipes has been
+> shown to beat its baseline yet. aixker-rlt 0.2.0 fixed the learner that
+> collapsed every 0.1.0 policy onto one action, and the quickstart's rule is now
+> learned (see [init.md](init.md)), but a harder rule needs more data and more
+> batches. Watch `entropy` and `policy` in the training log, and let `eval`
+> decide.
 
 Every recipe follows the method in [tutorial.md](tutorial.md). Read that first —
 it explains normalisation, holding data back, and how to read the report.

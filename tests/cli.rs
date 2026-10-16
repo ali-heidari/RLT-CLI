@@ -93,8 +93,8 @@ fn trained_workspace() -> TempDir {
 #[test]
 fn init_scaffolds_a_project_that_trains_and_evaluates() {
     // The quickstart, end to end, on a fresh empty directory. This asserts the
-    // three commands work together — not that the policy wins; on the pinned
-    // library revision it does not (docs/found-issues.md issue 8).
+    // three commands work together — not that the policy wins; the scaffold's
+    // 60 batches are too few for that (docs/init.md).
     let dir = TempDir::new().unwrap();
 
     rlt(&dir)
@@ -231,15 +231,7 @@ fn infer_emits_one_action_per_sample() {
     // command's result and nothing else, so `rlt infer | jq` works. The banner
     // and settings block go to stderr — filtering for `{` here is exactly what
     // hid the fact that they used to share this stream.
-    //
-    // `EMPTY INPUT` is excluded by name because the library prints it straight
-    // to stdout when a data source ends, past every filter this CLI configures
-    // (docs/found-issues.md issue 5). The exclusion is deliberately narrow:
-    // anything else that is not a record still fails.
-    let records: Vec<&str> = stdout
-        .lines()
-        .filter(|line| !line.is_empty() && *line != "EMPTY INPUT")
-        .collect();
+    let records: Vec<&str> = stdout.lines().filter(|line| !line.is_empty()).collect();
     assert!(
         records.iter().all(|line| line.starts_with('{')),
         "stdout must be records only:\n{}",
@@ -327,7 +319,7 @@ fn silent_still_writes_an_action_file_that_was_asked_for() {
         .output()
         .unwrap();
 
-    assert_only_the_upstream_line_leaked(&output);
+    assert_nothing_leaked(&output);
     assert_eq!(
         fs::read_to_string(dir.path().join("actions.jsonl"))
             .unwrap()
@@ -346,28 +338,66 @@ fn silent_infer_without_a_destination_prints_no_actions() {
         .output()
         .unwrap();
 
-    assert_only_the_upstream_line_leaked(&output);
+    assert_nothing_leaked(&output);
 }
 
 /// Assert that a silent run emitted nothing of its own.
 ///
-/// The library prints `EMPTY INPUT` straight to stdout when the data source
-/// ends, bypassing the log filter the CLI configures — `docs/found-issues.md`
-/// issue 5. Every inference run ends that way, so `--silent infer` cannot be
-/// byte-for-byte silent until that is fixed upstream. Asserting on the exact
-/// remainder keeps the test honest: anything the CLI itself prints still fails.
-fn assert_only_the_upstream_line_leaked(output: &std::process::Output) {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(
-        stdout.trim(),
-        "EMPTY INPUT",
-        "--silent leaked more than the known upstream line"
+/// Byte for byte: aixker-rlt 0.1.0 printed `EMPTY INPUT` straight to stdout
+/// when a data source ended, and 0.2.0 logs it instead, so nothing at all may
+/// reach either stream.
+fn assert_nothing_leaked(output: &std::process::Output) {
+    assert!(
+        output.stdout.is_empty(),
+        "--silent leaked stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
     );
     assert!(
         output.stderr.is_empty(),
         "--silent leaked {} bytes of stderr",
         output.stderr.len()
     );
+}
+
+#[test]
+fn training_that_completes_no_batch_fails_and_leaves_no_checkpoint() {
+    // batch_size is 8, so five rows never fill a batch. aixker-rlt 0.2.0 saves
+    // when its loop ends regardless, which would leave untrained weights
+    // looking like a trained model.
+    let dir = workspace(5);
+
+    rlt(&dir)
+        .args(["train", "--dataset", "./data.csv"])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no batch was trained"));
+
+    assert!(
+        !dir.path().join(CHECKPOINT).exists(),
+        "an untrained checkpoint was left behind"
+    );
+}
+
+#[test]
+fn a_checkpoint_from_0_1_0_still_loads_but_is_warned_about() {
+    // The file format did not change, so nothing else would tell them apart.
+    // The labels are what 0.1.0 wrote into every snapshot it saved.
+    let dir = trained_workspace();
+    let path = dir.path().join(CHECKPOINT);
+    let mut checkpoint: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    checkpoint["snapshot"] = serde_json::Value::from(
+        "[Total actions]\tHigh pressure: 3\tNormal pressure: 2\tLow pressure: 1",
+    );
+    fs::write(&path, checkpoint.to_string()).unwrap();
+
+    rlt(&dir)
+        .args(["infer", "--dataset", "./infer.csv"])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("trained by aixker-rlt 0.1.0"));
 }
 
 #[test]
@@ -698,10 +728,8 @@ fn eval_emits_a_json_summary() {
         .success();
 
     // Parsed, not merely searched: --format json exists so a CI step can read
-    // the result back. Written to a file rather than redirected from stdout
-    // because the library prints EMPTY INPUT straight to stdout when a data
-    // source ends (docs/found-issues.md issue 5), which would leave the
-    // redirect holding something that is not JSON through no fault of ours.
+    // the result back. Written through --output, so this also covers the file
+    // destination.
     let written = fs::read_to_string(dir.path().join("report.json")).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&written)
         .unwrap_or_else(|err| panic!("report is not JSON ({}):\n{}", err, written));
@@ -1216,10 +1244,112 @@ fn help_lists_the_commands_and_no_dead_flags() {
         .stdout(predicate::str::contains("infer"))
         .stdout(predicate::str::contains("export"));
 
-    // --learning-rate was accepted and silently discarded; it must stay gone.
+    // --learning-rate was once accepted and silently discarded, because
+    // aixker-rlt 0.1.0 had no way to set it. 0.2.0 does, so the flag is back,
+    // and it has to reach the settings the run actually uses.
     rlt(&dir)
-        .args(["train", "--help"])
+        .args([
+            "train",
+            "--dataset",
+            "./data.csv",
+            "--learning-rate",
+            "0.2",
+            "--dry-run",
+        ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("learning-rate").not());
+        .stderr(predicate::str::contains("learning rate: 0.2 (flag)"));
+}
+
+/// The weight tensors of a workspace's checkpoint, without the text snapshot.
+fn checkpoint_weights(dir: &TempDir) -> Vec<serde_json::Value> {
+    let text = fs::read_to_string(dir.path().join(CHECKPOINT)).unwrap();
+    let checkpoint: serde_json::Value = serde_json::from_str(&text).unwrap();
+    ["w1", "b1", "w2", "b2"]
+        .iter()
+        .map(|name| checkpoint[name]["data"].clone())
+        .collect()
+}
+
+/// Train a few batches against a reward that varies with the action, so the
+/// weights actually move, then return the workspace.
+fn seeded_training(seed: &str) -> TempDir {
+    let dir = workspace(400);
+    fs::write(dir.path().join("reward.py"), FIXED_REWARD).unwrap();
+    fs::write(
+        dir.path().join("infer.csv"),
+        "0.1,0.2,0.3,0.4,0.5,0.6\n0.2,0.3,0.4,0.5,0.6,0.7\n0.3,0.4,0.5,0.6,0.7,0.8\n",
+    )
+    .unwrap();
+
+    rlt(&dir)
+        .args([
+            "train",
+            "--dataset",
+            "./data.csv",
+            "--reward-script",
+            "./reward.py",
+            "--seed",
+            seed,
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success();
+
+    dir
+}
+
+#[test]
+fn a_seeded_run_trains_saves_loads_and_infers_identically_twice() {
+    let first = seeded_training("7");
+    let second = seeded_training("7");
+    let other = seeded_training("8");
+
+    assert!(
+        checkpoint_weights(&first) == checkpoint_weights(&second),
+        "the same seed trained different weights"
+    );
+    assert!(
+        checkpoint_weights(&first) != checkpoint_weights(&other),
+        "a different seed trained the same weights; the seed is not reaching the library"
+    );
+
+    // Load each saved checkpoint back and infer from it.
+    let infer = |dir: &TempDir| -> String {
+        let output = rlt(dir)
+            .args(["infer", "--dataset", "./infer.csv", "--seed", "7"])
+            .timeout(std::time::Duration::from_secs(60))
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        String::from_utf8(output).unwrap()
+    };
+
+    let decisions = infer(&first);
+    assert_eq!(decisions.lines().count(), 3, "{}", decisions);
+    assert_eq!(
+        decisions,
+        infer(&second),
+        "same weights and seed, different decisions"
+    );
+}
+
+#[test]
+fn training_logs_the_librarys_statistics() {
+    // aixker-rlt logs these at info level every log_interval batches. They are
+    // the only view of whether a run is learning, so they must survive the
+    // CLI's logger configuration.
+    let dir = workspace(400);
+    let config = CONFIG.replace("log_interval = 1000", "log_interval = 1");
+    fs::write(dir.path().join("Config.toml"), config).unwrap();
+
+    rlt(&dir)
+        .args(["train", "--dataset", "./data.csv"])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("batch 1: reward mean="))
+        .stderr(predicate::str::contains("entropy="));
 }

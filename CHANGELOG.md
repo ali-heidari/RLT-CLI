@@ -12,9 +12,67 @@ flag names and meanings, the JSON shapes `infer` and `eval` emit, the config
 file keys, and the Python script protocols. The Rust API is not a supported
 interface; this crate is a binary.
 
+## [0.2.0] - 2026-10-16
+
+Moves to **aixker-rlt 0.2.0**, which fixes the learning bugs that collapsed
+every trained policy onto one fixed action. Not tagged yet: this version also
+ships everything under [Unreleased] below, none of which has been released.
+
+**Retrain every model.** Checkpoints from aixker-rlt 0.1.0 still load, because
+the file format did not change, but their weights are the collapsed ones.
+
+### Changed
+
+- `aixker-rlt` comes from its `develop` branch at 0.2.0. `Cargo.lock` pins the
+  exact commit, so builds do not move with the branch.
+- **Training learns differently.** The library now trains on normalized
+  advantages with averaged, clipped gradients, a constant learning rate, an
+  entropy bonus and a fixed exploration schedule. Results from earlier versions
+  do not carry over.
+- **Reward shaping is off.** The library used to rewrite every reward with a
+  penalty of up to about 0.5, which swamped small rewards. Set
+  `reward_shaping = true` or pass `--reward-shaping` to restore it.
+- **`infer` and `eval` take no random actions.** They sample at
+  `infer_temperature` (default `0.5`; `0` always takes the best action). Eval
+  scores change as a result, and they repeat exactly with `--seed`.
+- **`log_interval` now does something.** It sets how many batches pass between
+  lines of training statistics at `info` level: reward mean and spread, loss,
+  gradient norm, epsilon, temperature, the policy's action mix and its entropy.
+  `0` turns them off. It used to be ignored.
+- `rlt init` writes `log_interval = 10` instead of `1000`, so its 60-batch run
+  shows statistics.
+- The settings block reports every learning setting and where it came from.
+- Nothing prints `EMPTY INPUT` to stdout any more, so `rlt infer | jq` and
+  `rlt eval --format json > report.json` work without filtering. The library
+  now logs that line instead.
+
+### Added
+
+- `--seed` on `train`, `infer` and `eval`, and a `seed` config key. The same
+  seed, data and settings train the same weights.
+- `--reward-shaping [BOOL]` and `--learning-rate RATE` on `train`.
+  `--learning-rate` was removed earlier because the library ignored it; it now
+  works.
+- `--infer-temperature T` on `infer` and `eval`.
+- Config keys `reward_shaping`, `learning_rate`, `max_grad_norm`,
+  `entropy_coef`, `epsilon_start`, `epsilon_end`, `temperature_start`,
+  `temperature_end`, `exploration_batches` and `infer_temperature`. Every one is
+  optional and defaults to the library's value.
+- Out-of-range learning settings fail before the run starts, for example a
+  learning rate of `0` or an epsilon above `1`.
+- `inspect` warns when a checkpoint was trained by aixker-rlt 0.1.0, and
+  `infer`, `eval` and `export` log the same warning. They still run.
+
+### Fixed
+
+- A training run that completed no batch exited `0`. Under 0.2.0 the library
+  always saves when it stops, so the run left a checkpoint of untrained weights
+  that later passed for a model. `train` now exits non-zero, and removes the
+  checkpoint if the run created it.
+
 ## [Unreleased]
 
-Everything so far. There has been no tagged release yet.
+Everything before 0.2.0. There has been no tagged release yet.
 
 ### Added
 
@@ -75,12 +133,7 @@ Everything so far. There has been no tagged release yet.
 
 ### Known issues
 
-- **A trained policy currently decides no better than chance.** This is a
-  limitation of the pinned `aixker-rlt` revision, not of this CLI: training
-  drives the policy toward a constant action rather than an input-dependent
-  one. Selecting the best action instead of sampling was measured and scores
-  worse, so it is the learning rather than the action selection. `rlt eval`
-  reports the result honestly, which is what it is for. See
-  [docs/found-issues.md](docs/found-issues.md) issue 8.
+- **A trained policy decided no better than chance** on the `aixker-rlt`
+  revision pinned here. Fixed by moving to aixker-rlt 0.2.0; see [0.2.0].
 - Checkpoint filenames are doubled (`m.json` becomes `models/m.json.m.json`),
   also upstream. The CLI reports the real path so the file can be found.

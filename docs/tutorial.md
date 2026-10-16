@@ -6,13 +6,10 @@ a policy, find out whether it beats the rule you already run, and export it.
 Everything here runs on data you generate locally — no dataset ships with this
 repository, and the generator is short enough to read.
 
-> **Read this first.** On the `aixker-rlt` revision this CLI pins, a trained
-> policy decides no better than chance. This tutorial ends with `eval` reporting
-> that honestly, because that is what it is for and because a tutorial that
-> pretended otherwise would waste your afternoon. The cause is upstream and
-> documented in [found-issues.md](found-issues.md) issue 8. Everything else here
-> — the data shaping, the reward function, the comparison method — is the part
-> you will still need when it is fixed.
+> **Read this first.** The first training run here is small on purpose, and
+> `eval` reports that it loses to the heuristic. Step 6 shows how to read *why*
+> from the report, and Step 7 trains on more data until it wins. A tutorial that
+> only showed the winning run would teach you less.
 
 ## The problem
 
@@ -194,7 +191,8 @@ model_name = "router.json"
 hidden_layers = 16
 batch_size = 32
 total_batches = 120    # 121 * 32 = 3872 samples, under the 4000 we generated
-log_interval = 1000
+log_interval = 10      # one line of training statistics every 10 batches
+seed = 1               # so your figures match the ones below
 ```
 
 `input_number` must match your row width exactly; a mismatch is reported before
@@ -230,8 +228,29 @@ Starting training with the following settings:
   model name: router.json (Config.toml)
   batch size: 32 (Config.toml)
   total batches: 120 (Config.toml)
+  backend: cpu (default)
   reward script: ./reward.py (Config.toml)
+  dry run: false (default)
+  seed: 1 (Config.toml)
+  learning rate: 0.05 (default)
+  max grad norm: 1 (default)
+  entropy coef: 0.1 (default)
+  exploration: epsilon 0.3 -> 0.05, temperature 1.5 -> 1 over 500 batches (default)
+  reward shaping: false (default)
+  stats log: every 10 batches (Config.toml)
+  csv header row: false (default)
+  csv delimiter: ',' (default)
   script timeout: 30s (default)
+```
+
+Every 10 batches the library logs what training is doing. The two values to
+watch are `policy`, the average chance of each action, and `entropy`, how
+spread out those chances are. For three actions, 1.0986 means "picks evenly";
+it falls as the policy commits:
+
+```text
+batch 60: ... | policy=[...] entropy=0.9780 | ...
+batch 120: ... | policy=[...] entropy=0.7404 | ...
 ```
 
 Ctrl-C is safe: the run winds down, keeps the last checkpoint, and exits `0`.
@@ -242,22 +261,20 @@ Ctrl-C is safe: the run winds down, keeps the last checkpoint, and exits `0`.
 rlt eval --dataset ./holdout.csv --baseline ./heuristic.py
 ```
 
-This is real output from the steps above, not an illustration. **Your figures
-will differ, and so will two runs of your own** — inference samples from the
-action distribution rather than taking the best action, so the policy's numbers
-move between evaluations even on an identical checkpoint and dataset. That is
-the second half of [found-issues.md](found-issues.md) issue 8. The baseline,
-being deterministic, reproduces exactly:
+This is real output from the steps above, not an illustration. With
+`seed = 1` and the same data you should see the same figures; without a seed,
+the policy's numbers move between runs, because `eval` samples its actions. The
+baseline is deterministic and always reproduces:
 
 ```text
 Evaluated 800 sample(s) from ./holdout.csv
 
 Policy: router.json
-  mean reward   -0.1829
-  success rate  32.5%
-  actions       0: 268 (33.5%)  mean reward 0.4030  success 62.7%
-                1: 263 (32.9%)  mean reward -0.0639  success 27.0%
-                2: 269 (33.6%)  mean reward -0.8829  success 7.8%
+  mean reward   0.4067
+  success rate  62.5%
+  actions       0: 735 (91.9%)  mean reward 0.4422  success 64.5%
+                1: 56 (7.0%)  mean reward 0.1411  success 44.6%
+                2: 9 (1.1%)  mean reward -0.8333  success 11.1%
 
 Baseline: ./heuristic.py
   mean reward   0.7059
@@ -265,34 +282,73 @@ Baseline: ./heuristic.py
   actions       0: 615 (76.9%)  mean reward 0.7854  success 82.1%
                 1: 185 (23.1%)  mean reward 0.4416  success 72.4%
 
-Difference: -0.8888 mean reward, -47.4pp success rate
+Difference: -0.2991 mean reward, -17.4pp success rate
 The baseline beats the policy.
 ```
 
 **Read the per-action breakdown before the headline number.** Compare the two
 distributions above:
 
-- The policy split its choices `33.5% / 32.9% / 33.6%`. Three actions at a third
-  each is the signature of a policy that is not looking at its input.
-- The baseline split `76.9% / 23.1%`, which is roughly the share of rows where
-  CPU is under `0.75`. Its distribution **reflects the data**.
+- The policy serves locally `91.9%` of the time. Serving locally is right for
+  most rows, so it learned the common case first.
+- The baseline redirects `23.1%` of the time, roughly the share of rows where
+  CPU is over `0.75`. The policy redirects only `7.0%`, so it has not yet
+  learned *when* to redirect.
 
-That contrast is the tell, and it is more informative than the mean reward. Note
-also that the policy's action 0 scored `+0.40` — serving locally is right most of
-the time, so choosing it at random still earns something. Its action 2 scored
-`-0.88` at a 7.8% success rate: it is shedding requests it could have served,
-which is the specific behaviour the reward function punishes hardest.
-
-That is what you are seeing here, and it is [found-issues.md](found-issues.md)
-issue 8 rather than a mistake in your reward function. To confirm it is not your
-setup, check the model itself:
+That contrast is the tell, and it says more than the mean reward. The policy is
+not broken; it has not seen enough examples of the rarer case. Two other checks
+confirm a run is healthy rather than diverged:
 
 ```bash
 rlt inspect
 ```
 
 Weights reaching `1e5` or higher, or a snapshot showing logits like
-`[0.0, -50.0, -50.0]`, mean the run diverged rather than converged.
+`[0.0, -50.0, -50.0]`, mean the run diverged rather than converged. And the
+settings block above shows exploration scheduled over 500 batches, while this
+run stopped at 120 — it ended while still taking random actions a quarter of
+the time.
+
+## Step 7: train on more
+
+120 batches is about all that 4,000 rows can feed. Generate ten times the
+training data by changing one line in `make_data.py`:
+
+```python
+for name, count in [("train.csv", 40000), ("holdout.csv", 800)]:
+```
+
+and train for ten times as long in `Config.toml`:
+
+```toml
+total_batches = 1200
+```
+
+Then run `python3 make_data.py`, `rlt train` and the same `eval` again. The
+held-out rows change too, because the generator draws them after the larger
+training set:
+
+```text
+Policy: router.json
+  mean reward   0.7193
+  success rate  83.0%
+  actions       0: 530 (66.2%)  mean reward 0.8642  success 88.7%
+                1: 270 (33.8%)  mean reward 0.4348  success 71.9%
+
+Baseline: ./heuristic.py
+  mean reward   0.6583
+  success rate  76.4%
+  actions       0: 598 (74.8%)  mean reward 0.7452  success 78.8%
+                1: 202 (25.2%)  mean reward 0.4010  success 69.3%
+
+Difference: +0.0610 mean reward, +6.6pp success rate
+The policy beats the baseline.
+```
+
+Seeds 2 and 3 scored 84.6% and 82.8%, so this is not one lucky run. The policy
+now redirects a third of the time, and each action scores better than the
+baseline's version of it. Like the heuristic, it never sheds: under this reward,
+shedding only pays at the very top of the load range.
 
 ### If your policy did win
 
@@ -306,7 +362,7 @@ policy:
 - **A tiny margin** — on 800 samples, a few hundredths is noise. Get more
   held-out data before believing it.
 
-## Step 7: gate it in CI
+## Step 8: gate it in CI
 
 ```bash
 rlt eval --dataset ./holdout.csv --baseline ./heuristic.py \
@@ -320,16 +376,14 @@ sys.exit(0 if gain > 0 else 1)
 "
 ```
 
-Use `--output` rather than redirecting stdout. The library still prints
-`EMPTY INPUT` directly to stdout when a data source ends
-([found-issues.md](found-issues.md) issue 5), so a redirect would capture that
-line too and the file would not parse. `--output` writes only the report.
+`--output` writes only the report. A stdout redirect works too: logs go to
+stderr.
 
 `eval` itself exits `0` whenever it managed to evaluate — a policy losing is a
 successful evaluation with a disappointing result, not a failure. Gate on
 `reward_gain` when you want CI to fail on a regression.
 
-## Step 8: export
+## Step 9: export
 
 ```bash
 rlt export --output ./exported/router.json
@@ -348,9 +402,8 @@ models/router.json...      the trained checkpoint
 result.json                the comparison, machine-readable
 ```
 
-The parts that survive the upstream fix are the parts that took judgement: the
-feature set, the reward function, and the decision to hold data back. The
-training command was one word.
+The parts that took judgement are the feature set, the reward function, and the
+decision to hold data back. The training command was one word.
 
 ## Next
 

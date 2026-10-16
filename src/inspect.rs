@@ -88,7 +88,8 @@ pub fn parse(path: &str, bytes: u64, text: &str) -> Result<Checkpoint, Box<dyn E
 
     let parameters = tensors.iter().map(|tensor| tensor.count).sum();
     let architecture = architecture(&tensors);
-    let warnings = warnings(&tensors);
+    let mut warnings = warnings(&tensors);
+    warnings.extend(legacy_warning(object));
 
     Ok(Checkpoint {
         path: path.to_string(),
@@ -104,6 +105,39 @@ pub fn parse(path: &str, bytes: u64, text: &str) -> Result<Checkpoint, Box<dyn E
             .map(|text| text.trim().to_string()),
         warnings,
     })
+}
+
+/// Labels only aixker-rlt 0.1.0 wrote into a checkpoint's snapshot.
+///
+/// The file format carries no version, but 0.1.0 assumed exactly three actions
+/// and named them in every snapshot it saved, while 0.2.0 writes "Action 0",
+/// "Action 1", ... instead. 0.1.0 only saved alongside a snapshot, so every
+/// checkpoint it wrote carries these.
+const LEGACY_LABELS: [&str; 3] = ["High pressure", "Normal pressure", "Low pressure"];
+
+/// A warning for a checkpoint trained by aixker-rlt 0.1.0, if this is one.
+///
+/// Such a checkpoint loads without complaint, because the format did not
+/// change, but its weights were trained by the learner that collapsed every
+/// policy onto one action.
+fn legacy_warning(object: &serde_json::Map<String, Value>) -> Option<String> {
+    let snapshot = object.get("snapshot")?.as_str()?;
+    LEGACY_LABELS
+        .iter()
+        .any(|label| snapshot.contains(label))
+        .then(|| {
+            "this checkpoint was trained by aixker-rlt 0.1.0, whose learner \
+             collapsed every policy onto one fixed action. It still loads, but \
+             its decisions are not worth using: train it again."
+                .to_string()
+        })
+}
+
+/// The 0.1.0 warning for a checkpoint's raw JSON, for commands that only load
+/// it. Anything unreadable gives no warning: the library decides what loads.
+pub fn legacy_checkpoint_warning(text: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    legacy_warning(value.as_object()?)
 }
 
 /// Read one `{ "dim": [...], "data": [...] }` field, if that is what it is.
@@ -285,6 +319,24 @@ mod tests {
         let parsed = parse("m.json", 100, &checkpoint("[0.1,0.2,0.3,0.4,0.5,0.6]")).unwrap();
 
         assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn a_checkpoint_trained_by_0_1_0_is_called_out() {
+        let old = checkpoint("[0.1,0.2,0.3,0.4,0.5,0.6]").replace(
+            "[Logits]",
+            r"[Total actions]\tHigh pressure: 3\tNormal pressure: 2\tLow pressure: 1",
+        );
+
+        let parsed = parse("m.json", 100, &old).unwrap();
+        assert_eq!(parsed.warnings.len(), 1, "{:?}", parsed.warnings);
+        assert!(parsed.warnings[0].contains("0.1.0"));
+        assert!(legacy_checkpoint_warning(&old).is_some());
+
+        // What 0.2.0 writes for the same line.
+        let new = checkpoint("[0.1,0.2,0.3,0.4,0.5,0.6]")
+            .replace("[Logits]", r"[Total actions]\tAction 0: 3\tAction 1: 2");
+        assert!(legacy_checkpoint_warning(&new).is_none());
     }
 
     #[test]

@@ -84,6 +84,14 @@ pub struct EvalArgs {
     /// Write the report here instead of stdout; "-" is stdout
     #[arg(long, value_name = "PATH")]
     pub output: Option<String>,
+
+    /// Seed for every random choice, so a run repeats exactly [default: unset]
+    #[arg(long, value_name = "N")]
+    pub seed: Option<u64>,
+
+    /// Sampling temperature for the policy's actions; 0 always takes the best one [default: 0.5]
+    #[arg(long, value_name = "T")]
+    pub infer_temperature: Option<f32>,
 }
 
 /// How `eval` presents its results.
@@ -136,6 +144,18 @@ pub struct TrainArgs {
     /// Field separator for CSV datasets [default: ,]
     #[arg(long, value_name = "CHAR")]
     pub delimiter: Option<char>,
+
+    /// Seed for every random choice, so a run repeats exactly [default: unset]
+    #[arg(long, value_name = "N")]
+    pub seed: Option<u64>,
+
+    /// Rewrite rewards with the library's built-in shaping [default: false]
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
+    pub reward_shaping: Option<bool>,
+
+    /// SGD step size, applied once per batch [default: 0.05]
+    #[arg(long, value_name = "RATE")]
+    pub learning_rate: Option<f32>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -175,6 +195,14 @@ pub struct InferArgs {
     /// Seconds slept between samples [default: 0 for a file, 10 for a .py provider]
     #[arg(long, value_name = "SECS")]
     pub interval_secs: Option<u64>,
+
+    /// Seed for every random choice, so a run repeats exactly [default: unset]
+    #[arg(long, value_name = "N")]
+    pub seed: Option<u64>,
+
+    /// Sampling temperature for the policy's actions; 0 always takes the best one [default: 0.5]
+    #[arg(long, value_name = "T")]
+    pub infer_temperature: Option<f32>,
 }
 
 #[derive(clap::Args, Debug)]
