@@ -380,6 +380,27 @@ fn training_that_completes_no_batch_fails_and_leaves_no_checkpoint() {
 }
 
 #[test]
+fn a_checkpoint_from_0_1_0_still_loads_but_is_warned_about() {
+    // The file format did not change, so nothing else would tell them apart.
+    // The labels are what 0.1.0 wrote into every snapshot it saved.
+    let dir = trained_workspace();
+    let path = dir.path().join(CHECKPOINT);
+    let mut checkpoint: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    checkpoint["snapshot"] = serde_json::Value::from(
+        "[Total actions]\tHigh pressure: 3\tNormal pressure: 2\tLow pressure: 1",
+    );
+    fs::write(&path, checkpoint.to_string()).unwrap();
+
+    rlt(&dir)
+        .args(["infer", "--dataset", "./infer.csv"])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("trained by aixker-rlt 0.1.0"));
+}
+
+#[test]
 fn inferring_without_a_checkpoint_fails_instead_of_using_random_weights() {
     let dir = workspace(20);
 

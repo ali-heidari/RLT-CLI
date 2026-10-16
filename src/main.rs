@@ -211,6 +211,19 @@ fn absolute(path: &Path) -> String {
     }
 }
 
+/// Warn when a checkpoint was trained by aixker-rlt 0.1.0.
+///
+/// A warning, not an error: the file still loads, and someone comparing old
+/// and new models on purpose should be able to.
+fn warn_if_legacy_checkpoint(checkpoint: &Path) {
+    let Ok(text) = fs::read_to_string(checkpoint) else {
+        return;
+    };
+    if let Some(warning) = inspect::legacy_checkpoint_warning(&text) {
+        log::warn!("{}: {}", absolute(checkpoint), warning);
+    }
+}
+
 /// Check that a checkpoint exists and actually holds a model.
 ///
 /// The library creates the file on load and only fills it when a batch is
@@ -1230,6 +1243,7 @@ async fn run_infer(
         "Train a model first, or point --model-name at an existing checkpoint.",
     )?;
     log::info!("loading checkpoint {}", absolute(&checkpoint));
+    warn_if_legacy_checkpoint(&checkpoint);
 
     let dataset_path = resolved
         .dataset
@@ -1441,6 +1455,7 @@ async fn run_eval(
         &checkpoint,
         "Train a model first, or point --model-name at an existing checkpoint.",
     )?;
+    warn_if_legacy_checkpoint(&checkpoint);
 
     let dataset_path = resolved
         .dataset
@@ -1705,6 +1720,8 @@ fn run_export(
         &checkpoint,
         "Train a model first, or pass --checkpoint with an existing path.",
     )?;
+    // Exporting is how a model leaves this machine, so the last chance to say so.
+    warn_if_legacy_checkpoint(&checkpoint);
 
     // fs::copy does not create the destination directory, and the default
     // output path points at one that will not exist on a fresh checkout.
